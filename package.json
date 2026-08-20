@@ -1,0 +1,19 @@
+{
+  "name": "prospect-reach",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local sales outreach automation tool. Excel library: exceljs, chosen over xlsx/SheetJS because it supports write-side cell styling (fill color, italics) and header row protection, which the blank template requires.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "generate:template": "node scripts/generate-template.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "playwright": "^1.47.0"
+  }
+}
