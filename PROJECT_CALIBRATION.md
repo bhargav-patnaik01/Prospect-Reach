@@ -85,15 +85,15 @@ instead of buying it.
 - [x] Excel read/validate/archive/reset (`src/excel.js`)
 - [x] Blank template file (`templates/blank/prospects.xlsx`)
 - [x] Placeholder category templates
-- [ ] Playwright automation — send-now path
-- [ ] Playwright automation — schedule-send path
-- [ ] Per-row failure handling (batch survives a bad row)
+- [x] Playwright automation — send-now path (built; not yet manually verified against a real Gmail account — dev environment has no real Chrome/display)
+- [x] Playwright automation — schedule-send path (built; same manual-verification caveat as above)
+- [x] Per-row failure handling (batch survives a bad row)
 - [ ] UI — download template
 - [ ] UI — upload + validate
 - [ ] UI — pre-run review screen
 - [ ] UI — run + live status + completion summary
 - [ ] Desktop shortcuts (Mac + Windows)
-- [ ] README
+- [x] README
 - [ ] Real templates/categories swapped in (waiting on team lead)
 - [ ] Mailsuite tracking verified against a real batch
 
@@ -109,6 +109,12 @@ instead of buying it.
 - Mailsuite tracking hasn't been verified end-to-end yet (extension not installed on dev
   machine as of this writing) — treat as a verification task, not a build task, once
   available.
+- Sprint 2's Playwright automation layer (`src/automation.js`) is built and its pure
+  logic (template resolution, per-row defensive validation) is smoke-tested, but the
+  actual compose/send/schedule flows against Gmail's real DOM have not been run —
+  this dev environment has no real installed Chrome, no display, and no logged-in test
+  Gmail account. `scripts/run-test-batch.js` needs to be run on a real machine before
+  trusting `src/gmail-selectors.js`; expect at least minor selector patching.
 
 ## How we work together on this
 
