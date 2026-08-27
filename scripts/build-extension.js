@@ -3,9 +3,11 @@
  * truth elsewhere in the repo, so nothing under extension/lib or
  * extension/templates is hand-maintained in two places:
  *
- *  - extension/lib/validate.js, extension/lib/sheet-rows.js  <- src/*.js
+ *  - extension/lib/validate.js, extension/lib/sheet-rows.js,
+ *    extension/lib/mailsuite-config.js                        <- src/*.js
  *    (byte-for-byte copies; these files have zero Node-specific imports, so
- *    they run unmodified in the extension's side panel page context)
+ *    they run unmodified in the extension's side panel/service worker
+ *    contexts — mailsuite-config.js is imported directly by background.js)
  *  - extension/templates/blank/prospects.xlsx                <- templates/blank/*
  *  - extension/templates/categories/*.json (+ a generated index.json)
  *                                                              <- templates/categories/*
@@ -34,7 +36,7 @@ const ROOT = join(__dirname, '..');
 async function copyLibModules() {
   const destDir = join(ROOT, 'extension', 'lib');
   await mkdir(destDir, { recursive: true });
-  for (const file of ['validate.js', 'sheet-rows.js']) {
+  for (const file of ['validate.js', 'sheet-rows.js', 'mailsuite-config.js']) {
     await copyFile(join(ROOT, 'src', file), join(destDir, file));
     console.log(`Copied src/${file} -> extension/lib/${file}`);
   }

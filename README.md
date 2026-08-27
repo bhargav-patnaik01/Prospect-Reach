@@ -29,14 +29,20 @@ into or built on top of by this branch.
 
 - **Sprint 4 (repo hygiene):** carried forward what's still valuable from the Playwright
   build and pruned what no longer applies. No extension code yet at that point.
-- **Sprint 5 (this sprint — extension scaffold + Excel layer port):** the actual, loadable
-  extension now exists under `extension/` — `manifest.json`, a side panel UI, and the
-  Excel validation logic ported to browser I/O. Still **no Gmail automation** — no content
-  script touches `mail.google.com`, and "Run Campaign" is a visibly disabled placeholder.
-  See `PROJECT_CALIBRATION.md`'s "SPRINT 5 NOTES" section for the judgment calls made
-  (side panel vs. popup, testing approach, xlsx library choice) and what still needs a
-  human to manually verify via "Load unpacked" (this dev environment has no real Chrome
-  window to click through).
+- **Sprint 5 (extension scaffold + Excel layer port):** the actual, loadable extension
+  appeared under `extension/` — `manifest.json`, a side panel UI, and the Excel
+  validation logic ported to browser I/O. No Gmail automation yet. Verified end to end
+  via a real "Load Unpacked" pass before Sprint 6 started. See `PROJECT_CALIBRATION.md`'s
+  "SPRINT 5 NOTES" section for the judgment calls made there.
+- **Sprint 6 (this sprint — content script + Mailsuite automation, send-now only):** the
+  extension now touches real Gmail for the first time. A content script
+  (`extension/content/`) opens compose in a dedicated tab, drives Mailsuite's template
+  picker by category, personalizes the inserted content, and sends — for one row at a
+  time (multi-row batching is Sprint 7). Schedule-send is deliberately deferred to
+  Sprint 7 too. See `PROJECT_CALIBRATION.md`'s "SPRINT 6 NOTES" section for both open
+  design decisions (dedicated tab vs. the rep's own tab; the service-worker keep-alive
+  strategy) with full reasoning, and for why the Mailsuite-specific selectors are flagged
+  as **unverified placeholder guesses** rather than confirmed knowledge.
 
 **Carried forward, unchanged:**
 - `src/excel.js` — parsing/validation/archiving logic. Framework-agnostic; only its
@@ -77,9 +83,12 @@ Ship via "Load unpacked" for now (free, no publishing wait); revisit the one-tim
 "Unlisted" Chrome Web Store listing later only if Developer Mode's warning banners prove
 genuinely annoying in daily use.
 
-**What works today (Sprint 5):** download template → upload → parse → review, entirely
-inside the extension, zero server. **What doesn't yet:** "Run Campaign" is a disabled
-placeholder — sending/scheduling through Gmail is a later sprint.
+**What works today:** download template → upload → parse → review, entirely inside the
+extension, zero server (Sprint 5); and, for a single row via the "Developer: send one
+test row" control under the review table, real Gmail/Mailsuite send-now automation
+(Sprint 6 — **unverified against a real session**, see PROJECT_CALIBRATION.md). **What
+doesn't work yet:** "Run Campaign" (multi-row batch running) stays a disabled placeholder;
+schedule-send doesn't exist yet.
 
 ## Working on this repo as a developer
 
@@ -99,9 +108,14 @@ Requires Node.js 18+ (ES modules) — for development only. End users never run 
 just load the already-built `extension/` folder, which is committed to the repo like
 `templates/blank/prospects.xlsx` already was.
 
-After changing `src/validate.js`, `src/sheet-rows.js`, `templates/blank/prospects.xlsx`,
-or `templates/categories/*.json`, re-run `npm run build:extension` and commit the
-regenerated `extension/` files alongside your source change — they're not auto-synced.
+After changing `src/validate.js`, `src/sheet-rows.js`, `src/mailsuite-config.js`,
+`templates/blank/prospects.xlsx`, or `templates/categories/*.json`, re-run
+`npm run build:extension` and commit the regenerated `extension/` files alongside your
+source change — they're not auto-synced.
+
+`extension/content/gmail-dom.js` and `extension/content/gmail-automation.js` are
+**hand-authored, not build artifacts** — they have no Node equivalent (there's no Node-side
+Gmail DOM to drive). Edit them directly.
 
 ## Excel library choice
 
@@ -123,6 +137,8 @@ src/gmail-selectors.js             every known Gmail/Mailsuite DOM selector, cen
 templates/blank/prospects.xlsx     blank template reps fill in and upload
 templates/categories/*.json        placeholder category definitions (superseded long-term
                                     by Mailsuite's own template library — see pivot notes)
+src/mailsuite-config.js            pure per-category Mailsuite config parsing/validation —
+                                    zero I/O, shared verbatim with the extension
 scripts/generate-template.js       generates the blank template
 scripts/generate-test-sheet.js     generates the excel.js test fixture sheet
 scripts/build-extension.js         (re)populates extension/lib, extension/templates,
@@ -130,14 +146,25 @@ scripts/build-extension.js         (re)populates extension/lib, extension/templa
 test/excel.test.js                 Node-fs-backed test harness (node:test)
 test/sheet-rows.test.js            proves validate.js/sheet-rows.js behave correctly against
                                     a Buffer/ArrayBuffer — the shape the extension hands them
+test/mailsuite-config.test.js      proves mailsuite-config.js loads/validates correctly
+                                    against the real (fixture-valued) category files
 
-extension/manifest.json            Manifest V3, minimal permissions (storage, downloads,
-                                    sidePanel) — no mail.google.com host permission yet
-extension/background.js            wires the toolbar icon to open the side panel; no batch
-                                    orchestration lives here yet
-extension/sidepanel.html/.js/.css  side panel UI: download template → upload → review
+extension/manifest.json            Manifest V3; storage/downloads/sidePanel/scripting
+                                    permissions + mail.google.com host permission
+extension/background.js            opens the side panel; orchestrates a single-row
+                                    send-now run (dedicated tab → inject → one message)
+extension/sidepanel.html/.js/.css  side panel UI: download template → upload → review →
+                                    (dev-only) send one test row
+extension/content/gmail-dom.js     Gmail/Mailsuite DOM helpers — hand-authored (not a
+                                    copy), adapted from src/gmail-selectors.js's knowledge
+                                    into plain CSS + a text-matching helper; Mailsuite
+                                    selectors are UNVERIFIED PLACEHOLDER GUESSES, flagged
+                                    in the file itself
+extension/content/gmail-automation.js  the compose → template-pick → personalize → send
+                                    flow; listens for one chrome.runtime message per row
 extension/lib/validate.js          <- copied from src/validate.js (build artifact)
 extension/lib/sheet-rows.js        <- copied from src/sheet-rows.js (build artifact)
+extension/lib/mailsuite-config.js  <- copied from src/mailsuite-config.js (build artifact)
 extension/lib/browser-excel.js     extension-specific I/O glue (fetch/FileReader/
                                     chrome.storage.session) — hand-authored, not a copy
 extension/templates/               <- copied from templates/ (build artifact), plus a
@@ -189,14 +216,17 @@ instead of through Playwright.)
 
 Carried over from `PROJECT_CALIBRATION.md` — not yet blocking:
 
-- Real category names/email copy pending from the team lead.
-- Real templates now need to be selected from Mailsuite's own in-compose template
-  picker rather than authored in our own JSON files — each category's config needs the
-  exact Mailsuite template name and its specific placeholder syntax, confirmed with the
-  TL per category (see PROJECT_CALIBRATION.md's pivot section).
+- **Real Mailsuite template names + exact per-template placeholder syntax** — every
+  `templates/categories/*.json` file currently ships an obviously-fake
+  `"FIXTURE — ..."` template name. A human needs to capture the real values from the
+  live Mailsuite dashboard, per category (placeholder syntax varies per template, per the
+  TL). This is a data change to those JSON files, not a code change — see
+  PROJECT_CALIBRATION.md's Sprint 6 notes.
+- **Mailsuite DOM selectors are unverified placeholder guesses** — see
+  `extension/content/gmail-dom.js`'s file header and PROJECT_CALIBRATION.md's Sprint 6
+  notes. Expect to patch these after the first real Gmail/Mailsuite pass.
 - Realistic send volume vs. Gmail's daily sending caps hasn't been stress-tested.
 - Mailsuite tracking verification hasn't happened yet.
-- Two open extension design decisions are flagged, not yet settled, in
-  PROJECT_CALIBRATION.md's pivot section: driving the rep's open Gmail tab vs. a
-  dedicated new tab, and the Manifest V3 service worker keep-alive strategy for long
-  batch runs.
+- Both design decisions from the pivot doc (dedicated tab vs. the rep's own tab; the
+  Manifest V3 service worker keep-alive strategy) are now **settled** — see
+  PROJECT_CALIBRATION.md's Sprint 6 notes for the decisions and full reasoning.

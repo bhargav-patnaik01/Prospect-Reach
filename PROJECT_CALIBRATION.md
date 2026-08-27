@@ -112,15 +112,37 @@ not rebuilt here):**
   - [x] Archive/reset state model designed for the new context (`buildArchiveCsv()`,
         `saveBatch()`/`loadBatch()`/`resetBatch()` against `chrome.storage.session`) — not
         wired to a working "Run Campaign" yet, since there's no batch to run
-  - [ ] Manual "Load unpacked" verification in a real Chrome window (not done in this dev
-        environment — no display/real Chrome available; see Sprint 5 summary for what was
-        verified instead and what still needs a human to confirm)
-- [ ] Content script — port `gmail-selectors.js` DOM knowledge from Playwright locators to
-      plain content-script DOM code (Sprint 6)
-- [ ] Background service worker — batch orchestration + keep-alive strategy (Sprint 7)
-- [ ] Mailsuite in-compose template picker integration (per-category template name +
-      placeholder syntax, confirmed with TL per category)
-- [ ] Real templates/categories swapped in (waiting on team lead)
+  - [x] Manual "Load unpacked" verification in a real Chrome window — confirmed by the
+        human at the start of Sprint 6: download → upload → review works end to end, the
+        Category column is visible in the review table
+- [x] Sprint 6 — content script + Mailsuite template-picker automation, send-now only
+      (this sprint):
+  - [x] Two open design decisions from the pivot doc settled and documented below
+        ("SPRINT 6 NOTES") — dedicated new tab, and the service-worker/content-script
+        hybrid lifecycle strategy
+  - [x] Content script (`extension/content/gmail-dom.js` + `gmail-automation.js`) — open
+        compose, invoke Mailsuite's template picker, select by category, wait
+        condition-based (not fixed-timeout) for template insertion, personalize via
+        in-place text-node replacement (preserves formatting), send + confirm
+  - [x] Per-category Mailsuite config (`mailsuiteTemplateName` + `placeholders` added to
+        `templates/categories/*.json`; `src/mailsuite-config.js` loads/validates it,
+        copied verbatim into `extension/lib/` like `validate.js`/`sheet-rows.js`) — loads
+        correctly against fixture values (`test/mailsuite-config.test.js`); **real
+        Mailsuite template names/placeholder strings are NOT in yet** (see Known open
+        questions) — every fixture value is an obviously-fake `"FIXTURE — ..."` string
+  - [x] Background service worker orchestrates one row end to end (dedicated tab → inject
+        → one message → one reply); `mail.google.com` host permission + `scripting`
+        permission added to manifest, justified by this sprint's actual code
+  - [ ] Manual real-Gmail/Mailsuite verification (not done in this dev environment — no
+        display/real Chrome/Mailsuite session available; see Sprint 6 summary for the
+        specific manual checklist and why the Mailsuite selectors in `gmail-dom.js` are
+        flagged as unverified placeholders, not confirmed selectors)
+- [ ] Schedule-send (Sprint 7)
+- [ ] Multi-row batch looping, live progress streaming to the side panel, per-row failure
+      isolation (Sprint 7)
+- [ ] Real Mailsuite template names + exact per-template placeholder syntax (needs a human
+      capturing these from the live Mailsuite dashboard, per category — TL confirmed
+      templates/categories exist, but not their exact picker names/placeholder strings)
 - [ ] Mailsuite tracking verified against a real batch
 
 ## Known open questions (waiting on external input, not yet blocking)
@@ -299,3 +321,114 @@ and clicking through download → upload → review with a real filled sheet. Ev
 in this sprint's exit criteria was verified (ported test suite passes; validation rules
 proven unchanged via the Buffer-based parity tests; no `mail.google.com` permission
 present; "Run Campaign" is visibly disabled, not faked).
+
+---
+
+## SPRINT 6 NOTES — content script + Mailsuite template-picker automation
+
+**Decision 1 — dedicated new tab, not the rep's open Gmail tab:** agreed with the pivot
+doc's recommendation, unchanged. `background.js`'s `openDedicatedGmailTab()` always calls
+`chrome.tabs.create()`. Reasoning: a rep reading/replying to their own inbox in the same
+tab the automation drives is a bad experience and a real risk of the automation and the
+human fighting over the same compose window (e.g. the rep clicks something mid-automation
+and the DOM state the content script expects no longer matches). A dedicated tab costs
+nothing extra — same logged-in session, same Mailsuite — and cleanly separates "the tool's
+work" from "the rep's own Gmail use" happening at the same time. It also gives a natural
+cancellation signal for later sprints: the rep closing that specific tab unambiguously
+means "stop," without having to distinguish that from them just navigating their own inbox.
+
+**Decision 2 — hybrid keep-alive strategy, chosen from current (not stale) research:**
+fetched Chrome's official service worker lifecycle docs fresh for this sprint rather than
+relying on training-data knowledge, since the brief specifically flagged that this API
+surface has shifted over time. Current documented behavior (as of this sprint):
+- The service worker is killed after **30 seconds of inactivity**; "receiving an event or
+  calling an extension API resets this timer."
+- A single event/request has a **5-minute hard cap** on processing time before Chrome
+  force-terminates it.
+- Opening a long-lived port no longer resets the idle timer by itself (as of Chrome 114) —
+  only actually sending/receiving a message across it does.
+
+Given this, the chosen design is the brief's third option, the hybrid: the background
+service worker does **not** run the multi-step wait/interact loop at all — that entire
+loop (open compose → Mailsuite icon → template dropdown → wait for insertion →
+personalize → send → confirm) lives entirely in the content script
+(`extension/content/gmail-automation.js`), which keeps running for as long as its
+dedicated tab stays open and is **not subject to the service worker's lifecycle at all**.
+The service worker's job is reduced to exactly one request/response pair per row: create
+the tab, inject the script, send one `chrome.tabs.sendMessage()`, await one reply. That
+await keeps the service worker's own event handler "active" (resetting its own 30-second
+timer per the docs above) for the duration of one row — in practice ~15-35 seconds against
+the content script's own per-step timeouts, nowhere near the 5-minute cap.
+**Why not periodic `chrome.alarms` keep-alive:** unnecessary complexity for this sprint's
+single-row skeleton — there's no long idle gap to bridge, since the one request/response
+pair is continuously "active" by the docs' own definition for its whole (short) duration.
+**Flagged for Sprint 7:** looping this over N rows sequentially inside one single
+`onMessage` callback risks approaching the 5-minute cap for a large batch. Sprint 7's
+batch loop should be driven by repeated short message round-trips (one per row, each its
+own event) rather than one long-lived callback spanning the whole batch — this is
+structural, and per this project's own history (the Sprint 3 SSE error-handling bug was
+exactly a "designed as an afterthought" problem), it needs to be designed in from the
+start of Sprint 7, not patched on after a batch run times out partway through in testing.
+
+Sources consulted (fetched live for this sprint):
+- [The extension service worker lifecycle | Chrome for Developers](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle)
+
+**Mailsuite selectors are unverified placeholders, not confirmed knowledge:** unlike the
+Gmail-native selectors (compose button, compose dialog, To/Subject/body fields, Send
+button — all traced back to `src/gmail-selectors.js`'s real, debugged Playwright-era
+knowledge), **no Mailsuite-specific selector has ever actually been inspected against a
+real DOM.** `src/gmail-selectors.js` predates any Mailsuite integration — Mailsuite was
+never installed on a dev machine during the Playwright build either (see the pre-pivot
+"Known open questions": "Mailsuite tracking hasn't been verified end-to-end yet"). The
+`MAILSUITE.icon`/`MAILSUITE.templateDropdown`/`MAILSUITE.templateItem` selector lists in
+`extension/content/gmail-dom.js` are informed guesses (most toolbar-icon extensions expose
+an `aria-label`/`title` containing their name), not verified selectors, and are documented
+as such directly in that file's header. **Expect to patch this file after the first real
+Gmail/Mailsuite pass** — this is the single most likely thing to need adjustment, more
+so than the Gmail-native selectors.
+
+**`gmail-selectors.js` could not be copied verbatim (unlike `validate.js`/`sheet-rows.js`):**
+it uses Playwright-only pseudo-selector syntax (`:has-text(...)`, `text=...`,
+`text=/pattern/i`) that `document.querySelector` does not understand at all — these aren't
+CSS, they're Playwright's own selector-engine extensions. `extension/content/gmail-dom.js`
+re-expresses the same underlying knowledge (which element, found by which stable
+attribute) as plain CSS plus a small `findByText()` helper for the handful of cases that
+relied on text-matching. This is expected, necessary divergence, not an oversight — the
+*knowledge* (which attribute is stable, which element to target) carried over; the
+*selector syntax* couldn't, because it was never valid outside Playwright to begin with.
+
+**Personalization preserves formatting — deliberately not a `textContent` read/rewrite:**
+`replaceTextInElement()` walks text nodes via `TreeWalker` and edits `nodeValue` in place,
+rather than reading `bodyField.textContent`, doing a string replace, and writing it back.
+The latter would silently flatten any rich formatting (bold, links, line breaks) Mailsuite's
+template inserted into plain text — an easy, hard-to-notice regression a naive
+implementation could introduce. This also keeps the visible diff a real user typing would
+produce: one logical edit, one `input` event, not a full content replacement.
+
+**What's logic-verified vs. what needs a real session:**
+- **Logic-verified (Node, no live DOM needed):** `src/mailsuite-config.js`'s
+  parsing/validation, proven against the real (fixture-valued) `templates/categories/*.json`
+  files in `test/mailsuite-config.test.js` — 4 new tests, all passing, including a check
+  that two categories can use genuinely different placeholder syntax (`[First Name]` vs.
+  `{{FirstName}}`), matching the pivot doc's "varies per template, not assumed globally."
+  All existing tests (13 total across the suite) still pass unmodified.
+- **Syntax-checked only:** every new/changed extension JS file passes `node --check`;
+  `manifest.json` parses as valid JSON with the new `host_permissions`/`scripting`/
+  `type: "module"` fields in place.
+- **Not verified at all — genuinely cannot be, without a live session:** whether
+  `.click()`/the `simulateClick()` pointer-event sequence actually registers on Gmail's
+  real compose button and Send button; whether the guessed Mailsuite selectors match
+  anything real; whether Mailsuite's template dropdown actually opens/populates the way
+  assumed; whether the condition-based insertion wait fires correctly against Mailsuite's
+  real DOM timing; whether the sent-confirmation toast text/selector is right. All of this
+  requires the human's own real Gmail + Mailsuite session — see the manual verification
+  checklist in the Sprint 6 summary delivered separately.
+
+**Real Mailsuite values are still fixtures, on purpose:** every `mailsuiteTemplateName` in
+`templates/categories/*.json` reads `"FIXTURE — <Category> (replace with real Mailsuite
+template name)"` — deliberately obvious and un-matchable, so a real send attempt against
+these fails loudly with "could not find a Mailsuite template item matching..." instead of
+silently matching some unrelated real template by accident. Swapping in real values (exact
+template names + exact placeholder strings, captured by a human from the live Mailsuite
+dashboard, per category) is a **data change to these JSON files**, not a code change —
+`buildMailsuiteConfigMap()`/`parseMailsuiteConfig()` don't need to change at all.

@@ -18,6 +18,10 @@ const reviewSection = document.getElementById('review-section');
 const summaryLine = document.getElementById('summary-line');
 const reviewBody = document.getElementById('review-body');
 const clearBatchButton = document.getElementById('clear-batch');
+const sendTestRowButton = document.getElementById('send-test-row');
+const testRowStatus = document.getElementById('test-row-status');
+
+let currentBatch = null; // { fileName, rawRows, result } — see renderReview()
 
 downloadTemplateButton.addEventListener('click', () => {
   chrome.downloads.download({
@@ -61,10 +65,41 @@ uploadInput.addEventListener('change', async () => {
 
 clearBatchButton.addEventListener('click', async () => {
   await resetBatch();
+  currentBatch = null;
+  sendTestRowButton.disabled = true;
+  testRowStatus.textContent = '';
   reviewSection.hidden = true;
   reviewBody.innerHTML = '';
   uploadInput.value = '';
   uploadStatus.textContent = '';
+});
+
+sendTestRowButton.addEventListener('click', async () => {
+  const row = currentBatch?.result.ready[0];
+  if (!row) return;
+
+  sendTestRowButton.disabled = true;
+  testRowStatus.classList.remove('error');
+  testRowStatus.textContent = `Sending row ${row.__row} (${row.email})… a dedicated Gmail tab will open.`;
+
+  try {
+    const result = await chrome.runtime.sendMessage({
+      type: 'PROSPECT_REACH_SEND_TEST_ROW',
+      row,
+    });
+
+    if (result?.success) {
+      testRowStatus.textContent = `Row ${row.__row} sent successfully.`;
+    } else {
+      testRowStatus.textContent = `Row ${row.__row} failed: ${result?.error ?? 'unknown error'}`;
+      testRowStatus.classList.add('error');
+    }
+  } catch (error) {
+    testRowStatus.textContent = `Row ${row.__row} failed: ${error.message}`;
+    testRowStatus.classList.add('error');
+  } finally {
+    sendTestRowButton.disabled = false;
+  }
 });
 
 function rowStatus(rowNumber, result) {
@@ -83,6 +118,9 @@ function reasonFor(rowNumber, result) {
 }
 
 function renderReview(fileName, rawRows, result) {
+  currentBatch = { fileName, rawRows, result };
+  sendTestRowButton.disabled = result.ready.length === 0;
+
   reviewSection.hidden = false;
   summaryLine.textContent =
     `${fileName} — ${result.ready.length} ready, ${result.warnings.length} warning(s), ` +

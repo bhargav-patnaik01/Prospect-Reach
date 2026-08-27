@@ -106,3 +106,16 @@ tr.status-error td.status-cell {
   font-size: 12px;
   margin: 8px 0 0;
 }
+
+.dev-tools {
+  margin-top: 12px;
+  padding: 8px;
+  border: 1px dashed #999;
+  border-radius: 4px;
+}
+
+.dev-tools summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}

@@ -1,5 +1,8 @@
 {
   "name": "Partnership",
-  "subject": "",
-  "body": ""
+  "mailsuiteTemplateName": "FIXTURE — Partnership (replace with real Mailsuite template name)",
+  "placeholders": {
+    "name": "{{FirstName}}",
+    "company": "{{Company}}"
+  }
 }

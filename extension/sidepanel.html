@@ -46,14 +46,27 @@
 
     <section class="step">
       <h2>4. Run</h2>
-      <button id="run-campaign" type="button" disabled title="Not built yet — a later sprint adds Gmail sending">
+      <button id="run-campaign" type="button" disabled title="Not built yet — full multi-row batch running is a later sprint">
         Run Campaign (coming soon)
       </button>
       <p class="placeholder-note">
-        This button is a placeholder. Sending/scheduling through Gmail is a later sprint —
-        this sprint only proves the download → upload → review flow works entirely inside
-        the extension.
+        This button is a placeholder. Multi-row batch running, live progress, and
+        schedule-send are later sprints — this button stays disabled until then.
       </p>
+
+      <details class="dev-tools">
+        <summary>Developer: send one test row now (Sprint 6 manual verification)</summary>
+        <p class="placeholder-note">
+          Sends <strong>row 1 of your current review table</strong> for real, through a
+          dedicated Gmail tab this extension opens — this actually sends an email if a
+          real Gmail/Mailsuite session is active. Not part of the eventual rep-facing UI;
+          this exists only so a human can verify Sprint 6's automation end to end.
+        </p>
+        <button id="send-test-row" type="button" class="secondary" disabled>
+          Send test row (row 1)
+        </button>
+        <p id="test-row-status" class="status" role="status"></p>
+      </details>
     </section>
 
     <script src="vendor/exceljs.min.js"></script>
