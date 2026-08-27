@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Prospect Reach",
+  "version": "0.1.0",
+  "description": "Download the prospects template, upload a filled sheet, and review it before a campaign run. No Gmail access yet — that lands in a later sprint.",
+  "permissions": ["storage", "downloads", "sidePanel"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open Prospect Reach"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}

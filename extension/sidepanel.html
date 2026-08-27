@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prospect Reach</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Prospect Reach</h1>
+      <p class="subtitle">Download the template, upload it filled in, review before you send.</p>
+    </header>
+
+    <section class="step">
+      <h2>1. Get the template</h2>
+      <button id="download-template" type="button">Download blank template</button>
+    </section>
+
+    <section class="step">
+      <h2>2. Upload your filled sheet</h2>
+      <input id="upload-input" type="file" accept=".xlsx" />
+      <p id="upload-status" class="status" role="status"></p>
+    </section>
+
+    <section class="step" id="review-section" hidden>
+      <h2>3. Review</h2>
+      <p id="summary-line" class="summary"></p>
+      <div class="table-wrap">
+        <table id="review-table">
+          <thead>
+            <tr>
+              <th>Row</th>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Company</th>
+              <th>Category</th>
+              <th>Status</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id="review-body"></tbody>
+        </table>
+      </div>
+      <button id="clear-batch" type="button" class="secondary">Clear and start over</button>
+    </section>
+
+    <section class="step">
+      <h2>4. Run</h2>
+      <button id="run-campaign" type="button" disabled title="Not built yet — a later sprint adds Gmail sending">
+        Run Campaign (coming soon)
+      </button>
+      <p class="placeholder-note">
+        This button is a placeholder. Sending/scheduling through Gmail is a later sprint —
+        this sprint only proves the download → upload → review flow works entirely inside
+        the extension.
+      </p>
+    </section>
+
+    <script src="vendor/exceljs.min.js"></script>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

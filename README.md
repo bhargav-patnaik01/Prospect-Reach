@@ -18,18 +18,25 @@ real, everyday, already-logged-in Chrome — the same one with Mailsuite install
 second profile, no CDP, no automation fingerprint, and (once the extension itself is
 built) no Node.js requirement for end users at all.
 
-**Branch, not a new repo:** this is a new branch (`chrome-extension-pivot`) rather than
-a separate repository, so the two architectures share one commit history and one issue
-tracker, and anyone landing on the repo can see exactly where and why the pivot
+**Branch, not a new repo:** this is a new branch (`chrome-extension-pivot-hygiene`) rather
+than a separate repository, so the two architectures share one commit history and one
+issue tracker, and anyone landing on the repo can see exactly where and why the pivot
 happened via `git log`. `master` is left exactly as it was — a working, debugged
 reference for the Playwright-era Gmail/Mailsuite selector behavior — and is not merged
 into or built on top of by this branch.
 
-## What this sprint is (repo hygiene only)
+## Sprint history on this branch
 
-This sprint carries forward what's still valuable from the Playwright build and prunes
-what no longer applies. It does **not** contain any extension code yet — no
-`manifest.json`, no content script, no popup/side panel. That's Sprint 5.
+- **Sprint 4 (repo hygiene):** carried forward what's still valuable from the Playwright
+  build and pruned what no longer applies. No extension code yet at that point.
+- **Sprint 5 (this sprint — extension scaffold + Excel layer port):** the actual, loadable
+  extension now exists under `extension/` — `manifest.json`, a side panel UI, and the
+  Excel validation logic ported to browser I/O. Still **no Gmail automation** — no content
+  script touches `mail.google.com`, and "Run Campaign" is a visibly disabled placeholder.
+  See `PROJECT_CALIBRATION.md`'s "SPRINT 5 NOTES" section for the judgment calls made
+  (side panel vs. popup, testing approach, xlsx library choice) and what still needs a
+  human to manually verify via "Load unpacked" (this dev environment has no real Chrome
+  window to click through).
 
 **Carried forward, unchanged:**
 - `src/excel.js` — parsing/validation/archiving logic. Framework-agnostic; only its
@@ -56,35 +63,45 @@ what no longer applies. It does **not** contain any extension code yet — no
   problem category doesn't exist once the code runs inside the rep's own Chrome.
 - The old Node/npm-based README instructions below (replaced by this one).
 
-## Setup (once the extension exists)
+## Setup — for an end user (rep)
 
-This will use Chrome's **"Load unpacked"** developer mode — no npm, no terminal, no
-build step for the end user:
+Chrome's **"Load unpacked"** developer mode — no npm, no terminal, no build step:
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top right).
-3. Click **Load unpacked** and select this repo's extension folder.
-4. Pin the extension, open Gmail, and use it from there.
+3. Click **Load unpacked** and select this repo's `extension/` folder.
+4. Click the extension's toolbar icon to open the side panel — download the template,
+   fill it in, upload it back, review the results.
 
-This flow doesn't exist yet — Sprint 5 adds `manifest.json` and the rest of the
-extension. Ship via "Load unpacked" for now (free, no publishing wait); revisit the
-one-time $5 "Unlisted" Chrome Web Store listing later only if Developer Mode's warning
-banners prove genuinely annoying in daily use.
+Ship via "Load unpacked" for now (free, no publishing wait); revisit the one-time $5
+"Unlisted" Chrome Web Store listing later only if Developer Mode's warning banners prove
+genuinely annoying in daily use.
 
-## Working on the carried-over code today
+**What works today (Sprint 5):** download template → upload → parse → review, entirely
+inside the extension, zero server. **What doesn't yet:** "Run Campaign" is a disabled
+placeholder — sending/scheduling through Gmail is a later sprint.
 
-The carried-over modules are still plain Node.js and can be exercised the same way
-they were pre-pivot, while the extension itself is being built:
+## Working on this repo as a developer
+
+`extension/lib/*.js`, `extension/templates/*`, and `extension/vendor/exceljs.min.js` are
+all **build artifacts** — generated from `src/`, `templates/`, and `node_modules/exceljs`
+respectively by `scripts/build-extension.js`. Don't hand-edit anything under
+`extension/lib/` or `extension/templates/`; edit the source it was copied from and rebuild.
 
 ```
 npm install
 npm run generate:template   # (re)generates templates/blank/prospects.xlsx
-npm test                    # runs the excel.js test suite
+npm run build:extension     # (re)populates extension/lib, extension/templates, extension/vendor
+npm test                    # runs the full test suite (excel.js + shared validation logic)
 ```
 
-Requires Node.js 18+ (ES modules). This is a development convenience for iterating on
-`excel.js`/`gmail-selectors.js`/templates — it is **not** how the finished tool will run
-for end users.
+Requires Node.js 18+ (ES modules) — for development only. End users never run npm; they
+just load the already-built `extension/` folder, which is committed to the repo like
+`templates/blank/prospects.xlsx` already was.
+
+After changing `src/validate.js`, `src/sheet-rows.js`, `templates/blank/prospects.xlsx`,
+or `templates/categories/*.json`, re-run `npm run build:extension` and commit the
+regenerated `extension/` files alongside your source change — they're not auto-synced.
 
 ## Excel library choice
 
@@ -96,14 +113,37 @@ supports both cleanly. (Carried over unchanged from the pre-pivot README.)
 ## Repo layout
 
 ```
-src/excel.js                       core parsing/validation/archiving module
+src/validate.js                    pure row-validation rules — zero I/O, shared verbatim
+                                    with the extension (single source of truth)
+src/sheet-rows.js                  pure row-extraction from an ExcelJS workbook — zero I/O,
+                                    also shared verbatim with the extension
+src/excel.js                       Node I/O wrapper: fs-backed parseSheet/loadCategories,
+                                    archive/reset/commitRun (re-exports validate.js's API)
 src/gmail-selectors.js             every known Gmail/Mailsuite DOM selector, centralized
 templates/blank/prospects.xlsx     blank template reps fill in and upload
 templates/categories/*.json        placeholder category definitions (superseded long-term
                                     by Mailsuite's own template library — see pivot notes)
 scripts/generate-template.js       generates the blank template
 scripts/generate-test-sheet.js     generates the excel.js test fixture sheet
-test/excel.test.js                 test harness (node:test)
+scripts/build-extension.js         (re)populates extension/lib, extension/templates,
+                                    extension/vendor from the sources above
+test/excel.test.js                 Node-fs-backed test harness (node:test)
+test/sheet-rows.test.js            proves validate.js/sheet-rows.js behave correctly against
+                                    a Buffer/ArrayBuffer — the shape the extension hands them
+
+extension/manifest.json            Manifest V3, minimal permissions (storage, downloads,
+                                    sidePanel) — no mail.google.com host permission yet
+extension/background.js            wires the toolbar icon to open the side panel; no batch
+                                    orchestration lives here yet
+extension/sidepanel.html/.js/.css  side panel UI: download template → upload → review
+extension/lib/validate.js          <- copied from src/validate.js (build artifact)
+extension/lib/sheet-rows.js        <- copied from src/sheet-rows.js (build artifact)
+extension/lib/browser-excel.js     extension-specific I/O glue (fetch/FileReader/
+                                    chrome.storage.session) — hand-authored, not a copy
+extension/templates/               <- copied from templates/ (build artifact), plus a
+                                    generated index.json listing bundled category files
+extension/vendor/exceljs.min.js    <- copied from node_modules/exceljs (build artifact);
+                                    the browser UMD build of the same exceljs version
 ```
 
 ## Public API (`src/excel.js`)

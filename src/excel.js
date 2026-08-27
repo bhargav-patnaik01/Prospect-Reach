@@ -2,19 +2,19 @@
  * Excel ingestion, validation, archiving, and partial-run-safe commit logic
  * for the prospects sheet. No console output here — logging belongs to the
  * caller (scripts, tests, and eventually the UI layer).
+ *
+ * Row-validation rules (validate.js) and row-extraction logic (sheet-rows.js)
+ * live in their own zero-I/O modules so the extension's browser-side port
+ * (extension/lib/) can share them verbatim instead of duplicating the rules —
+ * see PROJECT_CALIBRATION.md's Sprint 5 notes.
  */
 import ExcelJS from 'exceljs';
 import { access, appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { join } from 'node:path';
+import { extractRows } from './sheet-rows.js';
 
-/** Column headers, in order, expected in the prospects sheet. */
-export const COLUMNS = ['Name', 'Email', 'Company', 'Category'];
-
-/** The styled sample row shipped in the blank template; never real data. */
-export const EXAMPLE_ROW = ['Jane Doe', 'jane@example.com', 'Acme Co', 'Partnership'];
-
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export { COLUMNS, EXAMPLE_ROW, validateRows } from './validate.js';
 
 /**
  * Reads templates/categories/*.json and returns the set of known category
@@ -53,95 +53,7 @@ export async function parseSheet(input) {
     await workbook.xlsx.readFile(input);
   }
 
-  const sheet = workbook.worksheets[0];
-  const headers = [];
-  sheet.getRow(1).eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    headers[colNumber] = String(cell.value ?? '').trim().toLowerCase();
-  });
-
-  const rows = [];
-  for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
-    const row = sheet.getRow(rowNumber);
-    if (isRowBlank(row)) continue;
-
-    const record = { __row: rowNumber };
-    headers.forEach((header, colNumber) => {
-      if (!header) return;
-      record[header] = cellText(row.getCell(colNumber));
-    });
-    rows.push(record);
-  }
-
-  return rows;
-}
-
-function isRowBlank(row) {
-  let blank = true;
-  row.eachCell({ includeEmpty: true }, (cell) => {
-    if (cell.value !== null && cell.value !== undefined && String(cell.value).trim() !== '') {
-      blank = false;
-    }
-  });
-  return blank;
-}
-
-function cellText(cell) {
-  if (!cell || cell.value === null || cell.value === undefined) return '';
-  return String(cell.value).trim();
-}
-
-function matchesExampleRow(row) {
-  return (
-    row.name === EXAMPLE_ROW[0] &&
-    row.email === EXAMPLE_ROW[1] &&
-    row.company === EXAMPLE_ROW[2] &&
-    row.category === EXAMPLE_ROW[3]
-  );
-}
-
-/**
- * Validates raw parsed rows against the known category set. Never throws on
- * bad data — bad rows are reported as structured errors/warnings instead.
- * @param {Array<object>} rawRows - output of parseSheet().
- * @param {Set<string>} knownCategories - output of loadCategories().
- * @returns {{ready: object[], warnings: object[], errors: object[]}}
- */
-export function validateRows(rawRows, knownCategories) {
-  const ready = [];
-  const warnings = [];
-  const errors = [];
-
-  for (const row of rawRows) {
-    if (matchesExampleRow(row)) continue;
-
-    let hasError = false;
-    const email = row.email ?? '';
-
-    if (!email || !EMAIL_PATTERN.test(email)) {
-      errors.push({
-        row: row.__row,
-        column: 'Email',
-        message: email ? `Malformed email: "${email}"` : 'Email is missing',
-      });
-      hasError = true;
-    }
-
-    const category = row.category ?? '';
-    const categoryKnown = category && knownCategories.has(category.trim().toLowerCase());
-    if (!categoryKnown) {
-      warnings.push({
-        row: row.__row,
-        column: 'Category',
-        message: category ? `Unrecognized category: "${category}"` : 'Category is missing',
-      });
-    }
-
-    if (!hasError) {
-      ready.push(row);
-    }
-  }
-
-  return { ready, warnings, errors };
+  return extractRows(workbook);
 }
 
 function csvEscape(value) {

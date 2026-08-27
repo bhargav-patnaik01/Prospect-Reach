@@ -93,15 +93,31 @@ not rebuilt here):**
 - [x] README (Playwright/npm-based version — superseded by this branch's README)
 
 **Post-pivot (this branch — Chrome extension architecture):**
-- [x] Repo hygiene sprint — carried forward `excel.js`, `gmail-selectors.js`, template
-      generation, and test fixtures; dropped Playwright/Express; rewrote README for the
-      "Load unpacked" setup flow
-- [ ] `manifest.json` (Manifest V3)
+- [x] Repo hygiene sprint (Sprint 4) — carried forward `excel.js`, `gmail-selectors.js`,
+      template generation, and test fixtures; dropped Playwright/Express; rewrote README
+      for the "Load unpacked" setup flow
+- [x] Sprint 5 — extension scaffold + Excel layer port (this sprint):
+  - [x] `manifest.json` (Manifest V3) — `storage`, `downloads`, `sidePanel` permissions
+        only; no `mail.google.com` host permission yet (not needed until Sprint 6)
+  - [x] Side panel UI shell (`extension/sidepanel.html`/`.js`/`.css`) — download template
+        → upload → parse → review table; "Run Campaign" present but visibly disabled
+  - [x] Excel validation logic ported to browser I/O — `src/validate.js` and
+        `src/sheet-rows.js` extracted as zero-I/O shared modules, copied verbatim into
+        `extension/lib/` by `scripts/build-extension.js`; `extension/lib/browser-excel.js`
+        supplies the browser-specific I/O glue (`fetch`/`FileReader`/`chrome.storage`)
+  - [x] `loadCategories()`'s browser equivalent (`loadCategoriesBrowser()`) reads bundled
+        `templates/categories/*.json` via `chrome.runtime.getURL()` + `fetch()`, using a
+        build-time-generated `index.json` file list (a packaged extension has no
+        `fs.readdir()` equivalent)
+  - [x] Archive/reset state model designed for the new context (`buildArchiveCsv()`,
+        `saveBatch()`/`loadBatch()`/`resetBatch()` against `chrome.storage.session`) — not
+        wired to a working "Run Campaign" yet, since there's no batch to run
+  - [ ] Manual "Load unpacked" verification in a real Chrome window (not done in this dev
+        environment — no display/real Chrome available; see Sprint 5 summary for what was
+        verified instead and what still needs a human to confirm)
 - [ ] Content script — port `gmail-selectors.js` DOM knowledge from Playwright locators to
-      plain content-script DOM code
-- [ ] Background service worker — batch orchestration + keep-alive strategy
-- [ ] Popup/side-panel UI — replaces the old `public/index.html` concept
-- [ ] `excel.js` ported from Node filesystem APIs to browser File/ArrayBuffer APIs
+      plain content-script DOM code (Sprint 6)
+- [ ] Background service worker — batch orchestration + keep-alive strategy (Sprint 7)
 - [ ] Mailsuite in-compose template picker integration (per-category template name +
       placeholder syntax, confirmed with TL per category)
 - [ ] Real templates/categories swapped in (waiting on team lead)
@@ -217,3 +233,69 @@ validation, and `test/excel.test.js` depends on it existing to pass. Dropping it
 broken the very carry-over items (`excel.js` + its test suite) this sprint exists to preserve.
 Both `src/templates.js` and the pre-pivot `templates/categories/*.json` content still exist,
 untouched, in the `master` branch's history if needed for reference later.
+
+---
+
+## SPRINT 5 NOTES — extension scaffold + Excel layer port
+
+**Side panel vs. popup:** chose the side panel (`chrome.sidePanel`). A popup closes the
+instant focus leaves it, which is a poor fit for a review table someone wants to actually
+study — scroll through rows, maybe switch to Gmail to double-check something, then come
+back — before deciding to run a campaign. The side panel stays open independent of focus.
+Cost: a popup would have been slightly less code (no `background.js` needed just to call
+`chrome.sidePanel.setPanelBehavior()`), but that's a small, one-time cost against a UX
+mismatch that would recur every single review.
+
+**Sharing validation logic instead of duplicating it:** `src/excel.js`'s row-validation
+rules (`validateRows`) and row-extraction logic (the guts of `parseSheet`) had zero actual
+Node dependencies — they only ever touched `fs` and the Node `exceljs` import in the
+*wrapper* functions around them, not in the logic itself. Pulled both into their own
+zero-I/O modules — `src/validate.js` and `src/sheet-rows.js` — and `scripts/build-extension.js`
+copies them **verbatim** into `extension/lib/`. This means the actual validation rules
+exist in exactly one place in the repo; the Node and browser I/O wrappers around them
+(`src/excel.js`'s `parseSheet()`/`loadCategories()` vs. `extension/lib/browser-excel.js`'s
+`parseSheetFromArrayBuffer()`/`loadCategoriesBrowser()`) are the only genuinely
+environment-specific code, and that was true in the original design too — the port didn't
+change the rules, only relocated them.
+
+**Testing approach for extension-context code:** did not mock `chrome.*` APIs. Instead,
+`test/sheet-rows.test.js` proves `src/sheet-rows.js` + `src/validate.js` — the exact files
+copied into `extension/lib/` — behave correctly against a workbook loaded from an
+in-memory `Buffer`/`ArrayBuffer` (the same shape `FileReader.readAsArrayBuffer()` hands the
+extension), all under Node's built-in test runner, no mocking framework added. This works
+because ExcelJS's Node build and browser UMD build (`exceljs.min.js`) implement the same
+documented `Workbook`/`Worksheet` API — the same version, just two builds — so exercising
+the shared logic against the Node build is a legitimate parity check, not a simulation.
+What this approach *cannot* cover automatically: `chrome.runtime.getURL()`,
+`chrome.storage.session`, and `fetch()` against a `chrome-extension://` URL only exist in
+a real extension page context. Those — `loadCategoriesBrowser()`'s bundled-file fetch,
+`saveBatch()`/`loadBatch()`/`resetBatch()`, and the vendored `exceljs.min.js` UMD bundle
+actually parsing a real `.xlsx` file inside a live side panel — were **not** exercised by
+an automated test in this sprint. This dev environment has no display and no real Chrome
+window to drive "Load unpacked" through (its folder picker is a native OS dialog, not
+something browser automation can drive even when a display is present). All extension JS
+files pass `node --check` (syntax only) and `manifest.json`/`index.json` parse as valid
+JSON, but **a human needs to do the actual "Load unpacked" + click-through verification**
+before trusting this end-to-end. Flagged rather than claimed as done.
+
+**xlsx library — kept exceljs, browser UMD build, not a swap to SheetJS:** exceljs ships a
+`browser` field in its `package.json` (`dist/exceljs.min.js`, ~925 KB minified) implementing
+the same read/write API as the Node build. Runtime-writing an `.xlsx` file was never needed
+in the extension anyway — the blank template is pre-generated at build time
+(`npm run generate:template`) and served as a static bundled asset; the extension only ever
+*reads* an uploaded sheet at runtime. Since exceljs already had a browser build with an
+identical API to what `src/sheet-rows.js` already used, swapping to SheetJS would have meant
+re-verifying every row-extraction edge case against a different library's API for no
+functional gain — kept exceljs to keep the ported logic verifiably unchanged.
+
+**`templates/categories/index.json`:** a build-time-generated file listing the category
+JSON filenames, because a packaged/unpacked extension has no `fs.readdir()`-equivalent to
+discover its own bundled files at runtime the way `src/excel.js`'s `loadCategories()` does
+via Node's `readdir`. Generated by `scripts/build-extension.js`; not hand-maintained.
+
+**Not yet verified — needs a human:** actually running "Load unpacked" in a real Chrome
+window, confirming no console errors, confirming the permissions prompt is minimal/sane,
+and clicking through download → upload → review with a real filled sheet. Everything else
+in this sprint's exit criteria was verified (ported test suite passes; validation rules
+proven unchanged via the Buffer-based parity tests; no `mail.google.com` permission
+present; "Run Campaign" is visibly disabled, not faked).
