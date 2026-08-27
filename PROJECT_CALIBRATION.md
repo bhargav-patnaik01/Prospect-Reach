@@ -81,19 +81,29 @@ instead of buying it.
 
 ## Current status (update this section as sprints complete)
 
+**Pre-pivot (Playwright architecture — history preserved untouched on the `master` branch,
+not rebuilt here):**
 - [x] Repo scaffold
 - [x] Excel read/validate/archive/reset (`src/excel.js`)
 - [x] Blank template file (`templates/blank/prospects.xlsx`)
 - [x] Placeholder category templates
-- [x] Playwright automation — send-now path (built; not yet manually verified against a real Gmail account — dev environment has no real Chrome/display)
-- [x] Playwright automation — schedule-send path (built; same manual-verification caveat as above)
+- [x] Playwright automation — send-now path (built; never manually verified against a real Gmail account)
+- [x] Playwright automation — schedule-send path (built; same caveat)
 - [x] Per-row failure handling (batch survives a bad row)
-- [ ] UI — download template
-- [ ] UI — upload + validate
-- [ ] UI — pre-run review screen
-- [ ] UI — run + live status + completion summary
-- [ ] Desktop shortcuts (Mac + Windows)
-- [x] README
+- [x] README (Playwright/npm-based version — superseded by this branch's README)
+
+**Post-pivot (this branch — Chrome extension architecture):**
+- [x] Repo hygiene sprint — carried forward `excel.js`, `gmail-selectors.js`, template
+      generation, and test fixtures; dropped Playwright/Express; rewrote README for the
+      "Load unpacked" setup flow
+- [ ] `manifest.json` (Manifest V3)
+- [ ] Content script — port `gmail-selectors.js` DOM knowledge from Playwright locators to
+      plain content-script DOM code
+- [ ] Background service worker — batch orchestration + keep-alive strategy
+- [ ] Popup/side-panel UI — replaces the old `public/index.html` concept
+- [ ] `excel.js` ported from Node filesystem APIs to browser File/ArrayBuffer APIs
+- [ ] Mailsuite in-compose template picker integration (per-category template name +
+      placeholder syntax, confirmed with TL per category)
 - [ ] Real templates/categories swapped in (waiting on team lead)
 - [ ] Mailsuite tracking verified against a real batch
 
@@ -109,12 +119,10 @@ instead of buying it.
 - Mailsuite tracking hasn't been verified end-to-end yet (extension not installed on dev
   machine as of this writing) — treat as a verification task, not a build task, once
   available.
-- Sprint 2's Playwright automation layer (`src/automation.js`) is built and its pure
-  logic (template resolution, per-row defensive validation) is smoke-tested, but the
-  actual compose/send/schedule flows against Gmail's real DOM have not been run —
-  this dev environment has no real installed Chrome, no display, and no logged-in test
-  Gmail account. `scripts/run-test-batch.js` needs to be run on a real machine before
-  trusting `src/gmail-selectors.js`; expect at least minor selector patching.
+- `src/gmail-selectors.js`'s selector knowledge was debugged against real Gmail/Mailsuite
+  DOM during the Playwright era, but never against a content-script execution context —
+  expect some adaptation (Playwright locators vs. plain `document.querySelector`/DOM
+  events) even though the underlying selector strings should mostly carry over as-is.
 
 ## How we work together on this
 
@@ -130,3 +138,82 @@ instead of buying it.
   placeholders as specified rather than blocking.
 - Keep this file updated: check off completed items in **Current status**, and append to
   **Known open questions** if a sprint surfaces a new one.
+
+---
+
+## ARCHITECTURE PIVOT (supersedes earlier Playwright-based sections above)
+
+**Decision:** moved from Playwright/CDP browser automation to a **Chrome extension** (Manifest V3)
+running directly inside the rep's real, already-logged-in Chrome and Gmail session.
+
+**Why:** Playwright required a second, separate Chrome profile isolated from the rep's everyday
+browser (Chrome's CDP automation can't safely share a lock with a live daily-use profile). This
+caused three compounding, hard-to-fully-eliminate problems in practice: the profile had to be
+manually set up/copied (non-technical reps struggle with this), the profile did not reliably
+persist Mailsuite/login state between runs, and re-authentication was recurring. Root cause was
+likely a persistence bug (profile getting reset/copied fresh each run) rather than a Chrome
+security wall — but even a fully-fixed Playwright approach still requires that second profile to
+exist at all, which is inherent complexity, not incidental.
+
+A Chrome extension removes the second-profile requirement entirely: it runs inside the one
+Chrome the rep already uses, with Mailsuite already installed and already logged in. No CDP, no
+`--no-sandbox`/`navigator.webdriver` automation fingerprint, no Node.js requirement for end
+users at all (Excel parsing happens client-side in the extension).
+
+**What carries over from the Playwright build (not wasted work):**
+- All Gmail/Mailsuite DOM selector knowledge from Sprint 3 (compose button, Mailsuite template
+  dropdown, schedule-send quick-pick panel + date/time widget quirks) — translates directly from
+  Playwright API calls to plain DOM manipulation in a content script.
+- Sprint 1's `excel.js` validation logic — parsing/validation rules port near-as-is; only file
+  I/O changes (browser File/Blob APIs vs. Node filesystem).
+- The review-screen UX (download → upload → review → run → live status → summary) — same flow,
+  now rendered in an extension popup/side panel instead of a localhost page.
+
+**What's dropped:** Playwright, CDP, the dedicated automation Chrome profile and all its
+env vars (`CHROME_PROFILE_DIR`, `CHROME_PROFILE_NAME`), the Express server, `npm start`,
+the Node.js-installed-on-every-laptop requirement.
+
+**New components:**
+- `manifest.json` (Manifest V3) — permissions scoped to `mail.google.com`, `storage`, `downloads`.
+- Content script injected into Gmail — the actual click/fill logic (ported from `automation.js`).
+- Background service worker — orchestrates batch runs, messages between content script and UI.
+- Popup or side-panel UI — replaces `public/index.html`.
+
+**Open design decisions (flagged, not yet settled):**
+1. Should a campaign run drive the rep's currently-open Gmail tab, or should the extension open
+   a dedicated new tab for the run? (Leaning toward dedicated new tab, to avoid disrupting a rep
+   actively working in their inbox — needs confirmation before building.)
+2. Manifest V3 service workers are non-persistent (killed after ~30s idle) — a long batch run
+   needs a keep-alive strategy (periodic ping, or driving state from the content script/side-panel
+   connection instead of relying on the service worker alone). Needs to be designed in from the
+   start, not discovered mid-batch.
+
+**Distribution decision:** ship via Chrome's "Load unpacked" (Developer Mode) — free, no
+publishing wait, matches $0/local/plug-and-play constraints. Revisit "Unlisted" Chrome Web Store
+publishing later (one-time $5 fee, real auto-updates, less setup friction) only if Developer
+Mode's occasional warning banners prove genuinely annoying to the team in practice.
+
+**Mailsuite template picker requirement (confirmed with TL):** real templates already exist
+inside Mailsuite's own template library and must be selected via Mailsuite's in-compose picker —
+not authored in our own files. Personalization is NOT automatic on template insertion (confirmed:
+Mailsuite inserts static text with manual placeholders); our find-and-replace logic still runs,
+just against Mailsuite's inserted DOM content. Each category's config now needs, per template:
+the exact Mailsuite template name (for dropdown matching) and the exact placeholder syntax used
+inside that specific template (varies per template — confirm with TL per category, not assumed
+globally).
+
+**Repo hygiene sprint note (this branch):** `src/templates.js` (category token substitution) was
+**not** carried forward — it was only ever consumed by `src/automation.js` (dropped entirely,
+being pure Playwright API calls with no home in a content script), and nothing else in the
+carried-over code imports it. The pivot's own "Mailsuite template picker requirement" above
+already establishes that hand-authored category templates are being replaced by Mailsuite's own
+in-compose template library, so re-porting `templates.js`'s token-substitution shape now would
+likely be thrown away once real per-template placeholder syntax is confirmed with the TL.
+
+`templates/categories/*.json` (placeholder category definitions), by contrast, **were** carried
+forward as-is even though they weren't on the sprint's original five-item list — `src/excel.js`'s
+`loadCategories()` reads this directory to build its set of known category names for row
+validation, and `test/excel.test.js` depends on it existing to pass. Dropping it would have
+broken the very carry-over items (`excel.js` + its test suite) this sprint exists to preserve.
+Both `src/templates.js` and the pre-pivot `templates/categories/*.json` content still exist,
+untouched, in the `master` branch's history if needed for reference later.

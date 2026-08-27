@@ -1,17 +1,80 @@
 # Prospect Reach
 
-Local sales outreach automation tool. Sprint 1 built the foundation: repo
-scaffold, the blank Excel template, and the Excel ingestion/validation/
-archiving layer (`src/excel.js`). Sprint 2 added the Playwright browser
-automation layer (`src/automation.js`, `src/templates.js`) that takes
-Sprint 1's `ready` rows and actually composes and sends/schedules Gmail
-messages by driving a real, already-logged-in Chrome window — not the
-Gmail API — so it behaves exactly like a human using Gmail. Still no UI, no
-Express server, and no real email copy (placeholder categories only) —
-those are later sprints. Mailsuite-specific tracking verification is a
-separate, later sprint too.
+Local sales outreach automation tool for a small sales team. Personalizes and sends/
+schedules outreach emails from a rep's own already-logged-in Gmail, while preserving
+Mailsuite tracking — see `PROJECT_CALIBRATION.md` for full context, and its
+**ARCHITECTURE PIVOT** section in particular for why this branch looks the way it does.
 
-## Setup
+## Why this branch exists
+
+Sprints 1–3 (preserved untouched on the `master` branch) built this as a Node.js app
+driving a real Chrome window via Playwright/CDP against a second, dedicated Chrome
+profile. It worked, and the Gmail/Mailsuite DOM knowledge from that effort is genuinely
+valuable — but the second-profile requirement caused recurring setup, persistence, and
+re-login problems for a non-technical rep.
+
+This branch pivots to a **Chrome extension (Manifest V3)** that runs inside the rep's
+real, everyday, already-logged-in Chrome — the same one with Mailsuite installed. No
+second profile, no CDP, no automation fingerprint, and (once the extension itself is
+built) no Node.js requirement for end users at all.
+
+**Branch, not a new repo:** this is a new branch (`chrome-extension-pivot`) rather than
+a separate repository, so the two architectures share one commit history and one issue
+tracker, and anyone landing on the repo can see exactly where and why the pivot
+happened via `git log`. `master` is left exactly as it was — a working, debugged
+reference for the Playwright-era Gmail/Mailsuite selector behavior — and is not merged
+into or built on top of by this branch.
+
+## What this sprint is (repo hygiene only)
+
+This sprint carries forward what's still valuable from the Playwright build and prunes
+what no longer applies. It does **not** contain any extension code yet — no
+`manifest.json`, no content script, no popup/side panel. That's Sprint 5.
+
+**Carried forward, unchanged:**
+- `src/excel.js` — parsing/validation/archiving logic. Framework-agnostic; only its
+  file I/O will need to move from Node's `fs` to browser File/ArrayBuffer APIs later.
+- `src/gmail-selectors.js` — real, debugged Gmail/Mailsuite DOM selector knowledge
+  (compose button, Mailsuite template dropdown, schedule-send date/time widget quirks).
+  The single most valuable asset from the Playwright effort — not reinvented here.
+- `scripts/generate-template.js` — generates `templates/blank/prospects.xlsx` (locked
+  header row, styled example row). Column structure is unchanged by the pivot.
+- `scripts/generate-test-sheet.js` + `test/excel.test.js` — fixture generation and test
+  coverage for `excel.js`.
+- `templates/categories/*.json` — kept because `excel.js`'s `loadCategories()` reads
+  this directory for row validation and the test suite depends on it existing. Not one
+  of this sprint's originally-listed carry-over items — see PROJECT_CALIBRATION.md's
+  pivot section for why it was kept anyway.
+
+**Left behind, not ported:**
+- `src/automation.js` and `src/templates.js` — pure Playwright API calls / only
+  consumed by automation.js. No home in a content script; the *sequence knowledge*
+  they encoded is already captured in `gmail-selectors.js`.
+- `scripts/run-test-batch.js` — drove `automation.js` against a real Chrome profile.
+- `playwright` and `express` — removed from `package.json` entirely.
+- Any `CHROME_PROFILE_DIR`/`CHROME_PROFILE_NAME`/dedicated-profile concept — this
+  problem category doesn't exist once the code runs inside the rep's own Chrome.
+- The old Node/npm-based README instructions below (replaced by this one).
+
+## Setup (once the extension exists)
+
+This will use Chrome's **"Load unpacked"** developer mode — no npm, no terminal, no
+build step for the end user:
+
+1. Open `chrome://extensions`.
+2. Turn on **Developer mode** (top right).
+3. Click **Load unpacked** and select this repo's extension folder.
+4. Pin the extension, open Gmail, and use it from there.
+
+This flow doesn't exist yet — Sprint 5 adds `manifest.json` and the rest of the
+extension. Ship via "Load unpacked" for now (free, no publishing wait); revisit the
+one-time $5 "Unlisted" Chrome Web Store listing later only if Developer Mode's warning
+banners prove genuinely annoying in daily use.
+
+## Working on the carried-over code today
+
+The carried-over modules are still plain Node.js and can be exercised the same way
+they were pre-pivot, while the extension itself is being built:
 
 ```
 npm install
@@ -19,72 +82,27 @@ npm run generate:template   # (re)generates templates/blank/prospects.xlsx
 npm test                    # runs the excel.js test suite
 ```
 
-Requires Node.js 18+ (ES modules).
-
-## Running the Playwright automation layer
-
-`src/automation.js` drives **real, installed Chrome** (`channel: 'chrome'`,
-not Playwright's bundled Chromium) against **your actual Chrome profile**,
-via `launchPersistentContext`. It builds no login flow and expects Gmail to
-already be authenticated in that profile when the browser window opens.
-
-**Precondition:** the Chrome profile directory you point it at must already
-be logged into a test Gmail account — use a throwaway test account, not a
-real rep's inbox, while this is unverified. No credentials are read, stored,
-or hardcoded anywhere in this repo.
-
-To run the manual test batch (**this actually sends/schedules real mail** —
-it is not part of `npm test` and does not run in CI):
-
-```
-CHROME_PROFILE_DIR="/path/to/a/chrome/profile" node scripts/run-test-batch.js
-```
-
-On Windows, `CHROME_PROFILE_DIR` is typically a **copy** of a folder under
-`%LOCALAPPDATA%\Google\Chrome\User Data` — use a copy, not your live profile,
-so the automated window can't collide with a Chrome window you're actively
-using. The script opens a visible (`headless: false`) Chrome window, sends
-half the fixture rows now, schedules the other half, and prints a
-`{ succeeded, failed }` summary. Verify manually in the test account that
-sent messages arrived, scheduled messages show under "Scheduled," and the
-one deliberately bad row (malformed email) landed only in `failed`.
-
-### Maintenance note: Gmail DOM fragility
-
-Every Gmail selector automation.js touches lives in `src/gmail-selectors.js`.
-Gmail changes its DOM without notice and its class names are obfuscated, so
-selectors there prefer `aria-label`/`data-tooltip`/visible text over class
-names. If `composeMessage`, `sendNow`, or `scheduleSend` start timing out,
-that file is the one place to check and patch — `scheduleSend` in particular
-throws a specific error naming the selector that went missing, rather than
-silently falling back to send-now.
+Requires Node.js 18+ (ES modules). This is a development convenience for iterating on
+`excel.js`/`gmail-selectors.js`/templates — it is **not** how the finished tool will run
+for end users.
 
 ## Excel library choice
 
-**exceljs**, not xlsx/SheetJS. The blank template needs write-side cell
-styling (gray fill + italic on the example row, bold header) and a locked/
-protected header row — SheetJS's community edition has limited write-side
-styling support, while exceljs supports both cleanly.
-
-## npm scripts
-
-- `npm run generate:template` — deterministically (re)writes
-  `templates/blank/prospects.xlsx` from `scripts/generate-template.js`.
-- `npm test` — runs `test/excel.test.js` via Node's built-in test runner
-  (`node --test`), no extra framework.
+**exceljs**, not xlsx/SheetJS. The blank template needs write-side cell styling (gray
+fill + italic on the example row, bold header) and a locked/protected header row —
+SheetJS's community edition has limited write-side styling support, while exceljs
+supports both cleanly. (Carried over unchanged from the pre-pivot README.)
 
 ## Repo layout
 
 ```
 src/excel.js                       core parsing/validation/archiving module
-src/automation.js                  Playwright browser automation (compose/send/schedule/batch)
-src/gmail-selectors.js             every Gmail DOM selector, centralized
-src/templates.js                   category template token substitution
+src/gmail-selectors.js             every known Gmail/Mailsuite DOM selector, centralized
 templates/blank/prospects.xlsx     blank template reps fill in and upload
-templates/categories/*.json        placeholder category definitions
+templates/categories/*.json        placeholder category definitions (superseded long-term
+                                    by Mailsuite's own template library — see pivot notes)
 scripts/generate-template.js       generates the blank template
 scripts/generate-test-sheet.js     generates the excel.js test fixture sheet
-scripts/run-test-batch.js          manual test batch — sends/schedules real mail
 test/excel.test.js                 test harness (node:test)
 ```
 
@@ -122,53 +140,23 @@ test/excel.test.js                 test harness (node:test)
 `COLUMNS` and `EXAMPLE_ROW` are also exported so the template/fixture
 generators share a single source of truth with the validation logic.
 
-## Public API (`src/templates.js`)
-
-- `resolveTemplate(categoryJson, row)` → `{ to, subject, body }` — substitutes
-  `{{Token}}` placeholders in a category's `subject`/`body` using the row's
-  fields, case-insensitively (so both raw sheet columns like `Name` and
-  `src/excel.js`'s lower-cased `name` work). A missing token substitutes to
-  `''` and logs a warning; it never throws, and runs the same way whether
-  `subject`/`body` are empty placeholders or real copy.
-- `loadCategoryTemplates(dir)` → `Promise<Record<string, object>>` — reads
-  `templates/categories/*.json` into a map of lower-cased category name →
-  the full category object, for `resolveTemplate()` and `runBatch()` to use.
-
-## Public API (`src/automation.js`)
-
-- `launchBrowser({ userDataDir, headless? })` → `{ context, page }` — launches
-  real installed Chrome against an already-authenticated profile and
-  navigates to Gmail. Throws if `userDataDir` is omitted.
-- `closeBrowser(context)` — closes the context from `launchBrowser()`.
-- `composeMessage(page, { to, subject, body })` → a `Locator` scoped to the
-  new compose dialog, with To/Subject/Body already filled in.
-- `sendNow(page, composeHandle)` → `{ success, error? }` — clicks Send and
-  confirms via the "Message sent" toast or the compose window closing;
-  never assumes success just because nothing threw.
-- `scheduleSend(page, composeHandle, { date, time })` → `{ success }` —
-  drives Gmail's native scheduler and verifies its own confirmation toast;
-  throws a specific error naming the missing selector if any step in the
-  flow can't find what it's looking for (never silently falls back to
-  send-now).
-- `runBatch(rows, { mode, scheduleFor?, categories, page })` →
-  `{ succeeded, failed }` — processes rows one at a time (Gmail UI
-  automation isn't safely parallelizable); a malformed email or unknown
-  category is caught defensively here even if it slipped past Sprint 1
-  validation. One bad row never aborts the rest of the batch.
+(Note: `send(row)` above was previously implemented by Playwright's `runBatch()` in
+`src/automation.js`. That implementation is gone — Sprint 5's content script/service
+worker is what plugs into this callback next, driving the real Gmail DOM directly
+instead of through Playwright.)
 
 ## Known open questions
 
 Carried over from `PROJECT_CALIBRATION.md` — not yet blocking:
 
-- Real category names/email copy pending from the team lead; the current
-  `{ name, subject, body }` JSON shape is a placeholder, not locked.
-- Realistic send volume vs. Gmail's daily sending caps hasn't been
-  stress-tested.
-- Mailsuite tracking verification (Lane B) hasn't happened yet — this
-  sprint only builds against Gmail's own UI/confirmations, not Mailsuite.
-- The manual batch script (`scripts/run-test-batch.js`) hasn't been run
-  against a real Gmail account yet — it needs a machine with real Chrome,
-  a display, and a logged-in test account, none of which this dev
-  environment had. Selectors in `src/gmail-selectors.js` are a best-effort
-  first pass and should be expected to need at least minor patching once
-  run for real.
+- Real category names/email copy pending from the team lead.
+- Real templates now need to be selected from Mailsuite's own in-compose template
+  picker rather than authored in our own JSON files — each category's config needs the
+  exact Mailsuite template name and its specific placeholder syntax, confirmed with the
+  TL per category (see PROJECT_CALIBRATION.md's pivot section).
+- Realistic send volume vs. Gmail's daily sending caps hasn't been stress-tested.
+- Mailsuite tracking verification hasn't happened yet.
+- Two open extension design decisions are flagged, not yet settled, in
+  PROJECT_CALIBRATION.md's pivot section: driving the rep's open Gmail tab vs. a
+  dedicated new tab, and the Manifest V3 service worker keep-alive strategy for long
+  batch runs.
