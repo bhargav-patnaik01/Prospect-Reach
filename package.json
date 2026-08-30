@@ -9,10 +9,14 @@
   },
   "scripts": {
     "generate:template": "node scripts/generate-template.js",
+    "generate:brand": "node scripts/generate-brand-assets.js",
     "build:extension": "node scripts/build-extension.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "exceljs": "^4.4.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.4"
   }
 }

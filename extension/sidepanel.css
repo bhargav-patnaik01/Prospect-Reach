@@ -1,68 +1,184 @@
-body {
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  margin: 0;
-  padding: 16px;
-  color: #1a1a1a;
-  font-size: 14px;
+/**
+ * Cittaa brand palette — single source of truth for every color used in
+ * this stylesheet (Sprint 8: cosmetic-only pass, see PROJECT_CALIBRATION.md's
+ * Sprint 8 notes for the full rationale). No hardcoded hex values appear
+ * anywhere below this block; every color reference is one of these tokens.
+ *
+ * Values were sampled directly from actual pixels in
+ * assets/brand-source/cittaa-landing-reference.png (Cittaa's own marketing
+ * site, 1893x876) — not approximated from memory of similar brand palettes:
+ *   --cittaa-ink          #1b102b  darkest region sampled, x:0-400   y:780-870
+ *   --cittaa-purple-deep  #5a3385  background gradient,    x:1550   y:180
+ *   --cittaa-purple       #6e419f  background gradient,    x:120    y:720
+ *   --cittaa-lavender     #896bb6  the pearl graphic's mid-tone, x:960 y:470
+ *   --cittaa-pearl        #d3c9e6  sub-headline body copy, brightest pixel
+ *                                  in its bounding box (x:730-1160 y:700-780)
+ *   --cittaa-white        #fdfdfd  headline text, brightest pixel in its
+ *                                  bounding box (x:580-1300 y:250-350)
+ *
+ * Usability call (documented per this sprint's requirement — see the
+ * summary delivered alongside this change for the full reasoning): the
+ * source material is moody, low-contrast marketing content. This palette
+ * is applied to header/chrome/accent/button elements throughout this file;
+ * the review table (the human approval gate before real emails go out)
+ * deliberately stays high-contrast — white background, near-black text —
+ * rather than being re-skinned in brand color. Status colors (ready/
+ * warning/error) are semantic signal, not brand decoration, and are also
+ * left untouched by this palette on purpose.
+ */
+:root {
+  --cittaa-ink: #1b102b;
+  --cittaa-purple-deep: #5a3385;
+  --cittaa-purple: #6e419f;
+  --cittaa-lavender: #896bb6;
+  --cittaa-pearl: #d3c9e6;
+  --cittaa-white: #fdfdfd;
+
+  --text-primary: #1a1a1a;
+  --text-secondary: #555555;
+  --text-muted: #666666;
+  --surface: #ffffff;
+  --border: #e0e0e0;
+
+  --status-ready: #1e7a34;
+  --status-warning: #9a6700;
+  --status-error: #b3261e;
+
+  --disabled-bg: #999999;
+  --surface-tint: #f6f4f9;
+  --surface-tint-soft: #faf8fc;
 }
 
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.45;
+  background: var(--surface);
+}
+
+/* ---------- Header / brand chrome ---------- */
+
 header {
-  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 20px;
+  padding: 16px;
+  background: linear-gradient(155deg, var(--cittaa-ink) 0%, var(--cittaa-purple-deep) 130%);
+}
+
+header .wordmark {
+  height: 34px;
+  width: auto;
+  flex: 0 0 auto;
+  display: block;
+}
+
+header .heading-group {
+  min-width: 0;
 }
 
 h1 {
-  font-size: 18px;
-  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--cittaa-white);
+  letter-spacing: 0.01em;
 }
 
 .subtitle {
-  margin: 0;
-  color: #555;
+  margin: 2px 0 0;
+  color: var(--cittaa-pearl);
+  font-size: 12.5px;
 }
 
+/* ---------- Steps ---------- */
+
 .step {
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #e0e0e0;
+  margin: 0 16px 20px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.step:last-of-type {
+  border-bottom: none;
 }
 
 .step h2 {
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #444;
-  margin: 0 0 8px;
+  letter-spacing: 0.07em;
+  color: var(--cittaa-purple);
+  margin: 0 0 10px;
 }
 
+/* ---------- Buttons ---------- */
+
 button {
+  font: inherit;
   font-size: 13px;
-  padding: 6px 12px;
-  border-radius: 4px;
-  border: 1px solid #444;
-  background: #1a1a1a;
-  color: #fff;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--cittaa-purple);
+  background: var(--cittaa-purple);
+  color: var(--cittaa-white);
   cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--cittaa-lavender);
+  border-color: var(--cittaa-lavender);
+}
+
+button:active:not(:disabled) {
+  background: var(--cittaa-purple-deep);
+  border-color: var(--cittaa-purple-deep);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--cittaa-purple-deep);
+  outline-offset: 2px;
 }
 
 button.secondary {
-  background: #fff;
-  color: #1a1a1a;
+  background: var(--surface);
+  color: var(--cittaa-purple-deep);
+  border-color: var(--cittaa-purple);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: var(--cittaa-pearl);
+  color: var(--cittaa-ink);
 }
 
 button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-  background: #999;
-  border-color: #999;
+  background: var(--disabled-bg);
+  border-color: var(--disabled-bg);
+  color: var(--cittaa-white);
 }
+
+/* ---------- Status text / summary ---------- */
 
 .status {
   min-height: 1.2em;
   margin: 8px 0 0;
+  color: var(--text-secondary);
 }
 
 .status.error {
-  color: #b3261e;
+  color: var(--status-error);
 }
 
 .summary {
@@ -70,52 +186,99 @@ button:disabled {
   margin: 0 0 8px;
 }
 
+/* ---------- Review table — deliberately high-contrast, not brand-tinted ---------- */
+
 .table-wrap {
   overflow-x: auto;
   max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }
 
 table {
   border-collapse: collapse;
   width: 100%;
   font-size: 12px;
+  background: var(--surface);
 }
 
 th,
 td {
-  border: 1px solid #e0e0e0;
-  padding: 4px 6px;
+  border: 1px solid var(--border);
+  padding: 6px 8px;
   text-align: left;
   white-space: nowrap;
 }
 
+thead th {
+  background: var(--surface-tint);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
 tr.status-ready td.status-cell {
-  color: #1e7a34;
+  color: var(--status-ready);
+  font-weight: 600;
 }
 
 tr.status-warning td.status-cell {
-  color: #9a6700;
+  color: var(--status-warning);
+  font-weight: 600;
 }
 
 tr.status-error td.status-cell {
-  color: #b3261e;
+  color: var(--status-error);
+  font-weight: 600;
 }
 
+/* ---------- Misc ---------- */
+
 .placeholder-note {
-  color: #666;
+  color: var(--text-muted);
   font-size: 12px;
   margin: 8px 0 0;
 }
 
 .dev-tools {
   margin-top: 12px;
-  padding: 8px;
-  border: 1px dashed #999;
-  border-radius: 4px;
+  padding: 10px 12px;
+  border: 1px dashed var(--cittaa-purple);
+  border-radius: 6px;
+  background: var(--surface-tint-soft);
 }
 
 .dev-tools summary {
   cursor: pointer;
   font-size: 12px;
+  font-weight: 700;
+  color: var(--cittaa-purple-deep);
+}
+
+label {
+  display: block;
+  font-size: 13px;
   font-weight: 600;
+  margin-bottom: 6px;
+}
+
+label input {
+  display: block;
+  margin-top: 4px;
+  font: inherit;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 100%;
+  max-width: 120px;
+}
+
+input[type="file"] {
+  font-size: 13px;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  background: var(--surface-tint);
+  padding: 1px 4px;
+  border-radius: 3px;
 }
