@@ -109,7 +109,7 @@
     // essentially every row before Mailsuite's icon was even clicked. A
     // single synchronous check costs nothing and is just as informative
     // for the console.warn below.
-    if (!composeDialog.querySelector(`[email="${to.replace(/"/g, '\\"')}"]`)) {
+    if (!dom.findRecipientChip(composeDialog, to)) {
       console.warn(
         `[Prospect Reach] No recipient chip for "${to}" immediately after the mailto: link click ` +
           '(non-fatal — this is only a best-effort early attempt; the real recipient fill happens at the ' +
@@ -336,9 +336,13 @@
       // the side panel's status text, no DevTools round-trip needed.
       // Recipient is now filled right before this function runs (see
       // fillRecipientAtEnd() and runSendNowFlow()'s NEW STRATEGY note), so
-      // a missing chip here would be a genuinely new failure mode, not the
-      // old "wiped sometime during the Mailsuite flow" bug this diagnostic
-      // was originally added to chase.
+      // a Send failure here is a different problem than the recipient bug.
+      // NOTE: `[email]` is a known-unreliable attribute for detecting a
+      // real Gmail chip (confirmed 2026-08 it matches zero elements even
+      // when a chip is correctly present) — kept here only as one raw data
+      // point among several, not as a pass/fail signal on its own. See
+      // dom.findRecipientChip() for the actual multi-strategy check used
+      // in fillRecipientAtEnd().
       const emailElements = Array.from(composeDialog.querySelectorAll('[email]'));
       const emailElementDetails = emailElements
         .slice(0, 10)
@@ -426,20 +430,18 @@
     );
 
     try {
-      await dom.waitFor(() => composeDialog.querySelector(`[email="${to.replace(/"/g, '\\"')}"]`), {
+      await dom.waitFor(() => dom.findRecipientChip(composeDialog, to), {
         timeoutMs: ACTION_TIMEOUT_MS,
         description: `a recipient chip for "${to}" to appear after clicking + typing into the To field (end-of-flow fill)`,
         target: composeDialog,
       });
     } catch (error) {
-      const anyEmailElements = Array.from(composeDialog.querySelectorAll('[email]'));
-      const emailAttrValues = anyEmailElements.map((el) => el.getAttribute('email'));
       const allToFieldCandidates = Array.from(composeDialog.querySelectorAll(dom.GMAIL.toField.join(',')));
       throw new Error(
-        `${error.message} Found ${anyEmailElements.length} element(s) with an email="..." attribute in the ` +
-          `compose dialog at all (values: ${JSON.stringify(emailAttrValues)}). Original toField now: ` +
-          `${describeElement(toField)}. Currently ${allToFieldCandidates.length} element(s) match GMAIL.toField ` +
-          `selectors in the compose dialog: ${allToFieldCandidates.map(describeElement).join(' | ')}.`,
+        `${error.message} dom.findRecipientChip() found nothing (tried [email=...], [data-hovercard-id=...], ` +
+          `[title*=...], and a plain textContent.includes() check). Original toField now: ${describeElement(toField)}. ` +
+          `Currently ${allToFieldCandidates.length} element(s) match GMAIL.toField selectors in the compose dialog: ` +
+          `${allToFieldCandidates.map(describeElement).join(' | ')}.`,
       );
     }
   }

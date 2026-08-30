@@ -269,12 +269,42 @@
     return replacedCount;
   }
 
+  /**
+   * Finds a confirmed recipient chip for `email` under `root`. Tries
+   * several candidate markers, most- to least-specific, rather than a
+   * single guessed attribute — confirmed 2026-08 that `[email="..."]`
+   * (this project's original guess) matches ZERO elements in a real Gmail
+   * compose dialog even when a recipient chip is visibly, correctly
+   * present, so it can't be trusted alone as a presence check.
+   * `data-hovercard-id` is a long-stable Gmail attribute used on contact
+   * chips/avatars generally (not verified specifically for the To-field
+   * chip markup as of this writing); a `title` attribute containing the
+   * email (Gmail chips commonly show "Name <email>" as a tooltip) and a
+   * last-resort "does the email appear anywhere in root's visible text"
+   * check are included so a real chip is still detected even if none of
+   * the attribute-based guesses match this Gmail version's exact markup.
+   * @param {Element} root - typically the compose dialog.
+   * @param {string} email
+   * @returns {Element | null} the matched element, or `root` itself for the
+   *   textContent fallback (there's no specific chip element to return).
+   */
+  function findRecipientChip(root, email) {
+    const escaped = email.replace(/"/g, '\\"');
+    return (
+      root.querySelector(`[email="${escaped}"]`) ??
+      root.querySelector(`[data-hovercard-id="${escaped}"]`) ??
+      root.querySelector(`[title*="${email}"]`) ??
+      (root.textContent?.includes(email) ? root : null)
+    );
+  }
+
   window.__prospectReachGmailDom = {
     GMAIL,
     MAILSUITE,
     SENT_TOAST_TEXT,
     queryAny,
     findByText,
+    findRecipientChip,
     waitFor,
     simulateClick,
     simulateTyping,
