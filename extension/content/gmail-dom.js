@@ -39,14 +39,16 @@
   if (window.__prospectReachGmailDom) return;
 
   const GMAIL = {
-    // No composeButton/toField selectors here — openCompose() in
-    // gmail-automation.js opens compose (with recipient/subject pre-filled)
-    // by clicking a mailto: link that Gmail itself intercepts, rather than
-    // clicking Gmail's own Compose button and typing into the To field
-    // directly. See that function's header comment for the full 2026-08
-    // history of why (every direct-typing/pasting approach produced a
-    // recipient chip that looked correct but got silently wiped later).
+    // No composeButton here — openCompose() in gmail-automation.js opens
+    // compose by clicking a mailto: link that Gmail itself intercepts,
+    // rather than clicking Gmail's own Compose button.
+    //
+    // toField IS used (2026-08, reintroduced) — not by openCompose()
+    // anymore, but by fillRecipientAtEnd(), which fills the recipient for
+    // real at the very end of the flow, after Mailsuite is done touching
+    // the page. See gmail-automation.js's NEW STRATEGY notes.
     composeDialogs: ['div[role="dialog"]'],
+    toField: ['textarea[name="to"]', 'input[aria-label^="To"]'],
     subjectField: ['input[name="subjectbox"]'],
     bodyField: ['div[aria-label="Message Body"][role="textbox"]', 'div[g_editable="true"][role="textbox"]'],
     sendButton: ['div[role="button"][data-tooltip^="Send"]'],
@@ -183,11 +185,49 @@
     el.click();
   }
 
-  // No pasteText/pressEnter/typeText/setEditableContent helpers here
-  // anymore — they existed to simulate filling Gmail's To/Subject fields
-  // directly, which openCompose() in gmail-automation.js no longer does
-  // (see its header comment for why: a mailto: link click now gets both
-  // fields filled through Gmail's own genuine handling instead).
+  /**
+   * Simulates a real user typing `text` into `el`, one character at a time
+   * (keydown -> keypress -> mutate value/textContent -> input -> keyup per
+   * character), rather than setting the whole value in one shot. Gmail's To
+   * field is a People Kit autocomplete widget that reacts to per-keystroke
+   * `input` events to drive its suggestion list — a single bulk value-set
+   * (or a paste event) does not reliably reproduce that, per 2026-08 field
+   * testing. Does NOT press Enter/Tab at the end — call simulateEnterKey()
+   * separately once typing is done, matching how a real user commits a
+   * recipient chip. Used by fillRecipientAtEnd() in gmail-automation.js.
+   * @param {Element} el
+   * @param {string} text
+   */
+  function simulateTyping(el, text) {
+    el.focus();
+    for (const char of text) {
+      const keyOpts = { key: char, bubbles: true, cancelable: true };
+      el.dispatchEvent(new KeyboardEvent('keydown', keyOpts));
+      el.dispatchEvent(new KeyboardEvent('keypress', keyOpts));
+      if ('value' in el) {
+        el.value += char;
+      } else {
+        el.textContent += char;
+      }
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, data: char, inputType: 'insertText' }));
+      el.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
+    }
+  }
+
+  /**
+   * Simulates pressing Enter on `el` — real keydown/keypress/keyup, not a
+   * synthetic value change. Used to commit a recipient chip after
+   * simulateTyping() fills the To field's raw text, the same way a real
+   * user presses Enter (or Tab, or clicks a suggestion) to convert typed
+   * text into a chip.
+   * @param {Element} el
+   */
+  function simulateEnterKey(el) {
+    const opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+    el.dispatchEvent(new KeyboardEvent('keydown', opts));
+    el.dispatchEvent(new KeyboardEvent('keypress', opts));
+    el.dispatchEvent(new KeyboardEvent('keyup', opts));
+  }
 
   /**
    * Replaces every occurrence of each `replacements` key with its value,
@@ -237,6 +277,8 @@
     findByText,
     waitFor,
     simulateClick,
+    simulateTyping,
+    simulateEnterKey,
     replaceTextInElement,
   };
 })();

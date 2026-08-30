@@ -62,6 +62,18 @@
    * pre-filled through Gmail's own genuine handling — same reliability as
    * the URL approach — without any page navigation at all, so the page
    * (and Mailsuite, already warm) never reloads.
+   *
+   * NEW STRATEGY (2026-08): stopped trying to make the recipient survive
+   * the Mailsuite template flow at all. This mailto: fill is now only a
+   * best-effort first attempt — its own checks below are downgraded to
+   * console.warn, not throw, specifically so a failure here does NOT stop
+   * the flow. The recipient field is filled for real, authoritatively, at
+   * the very end of runSendNowFlow() via fillRecipientAtEnd() — after
+   * Mailsuite has already finished touching the DOM, using the same
+   * simulateClick() + simulateTyping()/simulateEnterKey() sequence proven
+   * to reliably register a real chip. Subject is left to this mailto: fill
+   * only (not re-filled at the end) since it's never been reported missing
+   * the way the recipient has been.
    * @param {string} to
    * @param {string} subject
    * @returns {Promise<Element>} the compose dialog element.
@@ -87,41 +99,39 @@
       { timeoutMs: ACTION_TIMEOUT_MS, description: 'a compose dialog to open after clicking a mailto: link' },
     );
 
-    // Sanity-check Gmail actually pre-filled the recipient rather than
-    // assuming it and finding out only much later (see this function's
-    // history above — that's exactly what went wrong before).
-    try {
-      await dom.waitFor(() => composeDialog.querySelector(`[email="${to.replace(/"/g, '\\"')}"]`), {
+    // Best-effort only — see this function's NEW STRATEGY note above. The
+    // authoritative recipient fill+check happens at the end of
+    // runSendNowFlow() via fillRecipientAtEnd(), not here.
+    await dom
+      .waitFor(() => composeDialog.querySelector(`[email="${to.replace(/"/g, '\\"')}"]`), {
         timeoutMs: ACTION_TIMEOUT_MS,
         description: `a recipient chip for "${to}" to be pre-filled via the mailto: link`,
         target: composeDialog,
+      })
+      .catch((error) => {
+        console.warn(
+          `[Prospect Reach] ${error.message} (non-fatal — this is only a best-effort early attempt; ` +
+            'the real recipient fill happens at the end, via fillRecipientAtEnd()).',
+        );
       });
-    } catch (error) {
-      const anyEmailElements = Array.from(composeDialog.querySelectorAll('[email]'));
-      const emailAttrValues = anyEmailElements.map((el) => el.getAttribute('email'));
-      throw new Error(
-        `${error.message} Found ${anyEmailElements.length} element(s) with an email="..." attribute in the ` +
-          `compose dialog at all (values: ${JSON.stringify(emailAttrValues)}).`,
-      );
-    }
 
     const subjectField = await dom.waitFor(() => dom.queryAny(composeDialog, dom.GMAIL.subjectField), {
       timeoutMs: ACTION_TIMEOUT_MS,
       description: 'the Subject field inside the compose dialog (GMAIL.subjectField)',
       target: composeDialog,
     });
-    try {
-      await dom.waitFor(() => subjectField.value === subject, {
+    await dom
+      .waitFor(() => subjectField.value === subject, {
         timeoutMs: ACTION_TIMEOUT_MS,
         description: `the Subject field to be pre-filled with "${subject}" via the mailto: link`,
         target: composeDialog,
+      })
+      .catch((error) => {
+        console.warn(
+          `[Prospect Reach] ${error.message} Subject field's actual current value: ` +
+            `${JSON.stringify(subjectField.value)} (non-fatal).`,
+        );
       });
-    } catch (error) {
-      // subjectField.value is read fresh here, not baked into the
-      // description above — description strings are built once,
-      // synchronously, when waitFor() is called.
-      throw new Error(`${error.message} Subject field's actual current value: ${JSON.stringify(subjectField.value)}.`);
-    }
 
     return composeDialog;
   }
@@ -129,15 +139,17 @@
   /**
    * Clicks Mailsuite's icon in the compose toolbar, waits for its template
    * dropdown, and selects the template matching `mailsuiteTemplateName`.
+   *
+   * No recipient-chip checkpoints in here anymore (2026-08) — under the
+   * current strategy the recipient is expected to be absent/unreliable
+   * through this whole function; it gets filled for real afterward, see
+   * fillRecipientAtEnd() and runSendNowFlow()'s NEW STRATEGY note.
    * @param {Element} composeDialog
    * @param {string} mailsuiteTemplateName
-   * @param {string} to - the row's email address, to checkpoint the
-   *   recipient chip's survival at each sub-step (see runSendNowFlow's
-   *   2026-08 note: it disappears somewhere in this function specifically).
    * @returns {Promise<number>} the body's text length immediately before the
    *   template-item click, for waitForTemplateInsertion() to compare against.
    */
-  async function selectMailsuiteTemplate(composeDialog, mailsuiteTemplateName, to) {
+  async function selectMailsuiteTemplate(composeDialog, mailsuiteTemplateName) {
     const mailsuiteIcon = await dom.waitFor(() => dom.queryAny(composeDialog, dom.MAILSUITE.icon), {
       timeoutMs: ACTION_TIMEOUT_MS,
       description:
@@ -145,7 +157,6 @@
         'UNVERIFIED placeholder selector, see file header; likely needs patching after a real Gmail pass)',
     });
     dom.simulateClick(mailsuiteIcon);
-    assertRecipientStillPresent(composeDialog, to, 'right after clicking the Mailsuite icon (before the dropdown opens)');
 
     const dropdown = await dom.waitFor(
       () =>
@@ -163,7 +174,6 @@
           'or MAILSUITE.templateDropdown match — UNVERIFIED placeholder)',
       },
     );
-    assertRecipientStillPresent(composeDialog, to, 'right after the Mailsuite template dropdown opened (before finding the template item)');
 
     const pattern = new RegExp(escapeRegExp(mailsuiteTemplateName), 'i');
     // A single synchronous findByText() check here raced Mailsuite's own
@@ -203,7 +213,6 @@
           'MAILSUITE.templateItem/templateDropdown needs patching for the real dropdown markup.',
       );
     }
-    assertRecipientStillPresent(composeDialog, to, 'right after finding the Mailsuite template item (before clicking it)');
 
     // Capture the body's length right here, immediately before the click —
     // confirmed 2026-08: Mailsuite inserts the template's HTML synchronously
@@ -217,7 +226,6 @@
     const lengthBeforeInsert = bodyFieldBeforeInsert ? bodyFieldBeforeInsert.textContent.length : 0;
 
     dom.simulateClick(templateItem);
-    assertRecipientStillPresent(composeDialog, to, 'right after clicking the Mailsuite template item');
 
     return lengthBeforeInsert;
   }
@@ -318,13 +326,12 @@
       ]);
     } catch (error) {
       // Debug context appended to the thrown message — surfaces directly in
-      // the side panel's status text, no DevTools round-trip needed. Also
-      // checks the Subject field's current value: the recipient chip has
-      // repeatedly survived immediate + 2s-later checks in openCompose but
-      // still ended up gone by send time (confirmed 2026-08, across four
-      // different commit techniques) — if Subject is ALSO gone/wrong here,
-      // that points at something during the Mailsuite template flow
-      // resetting the whole compose form, not a recipient-specific problem.
+      // the side panel's status text, no DevTools round-trip needed.
+      // Recipient is now filled right before this function runs (see
+      // fillRecipientAtEnd() and runSendNowFlow()'s NEW STRATEGY note), so
+      // a missing chip here would be a genuinely new failure mode, not the
+      // old "wiped sometime during the Mailsuite flow" bug this diagnostic
+      // was originally added to chase.
       const emailElements = Array.from(composeDialog.querySelectorAll('[email]'));
       const emailElementDetails = emailElements
         .slice(0, 10)
@@ -348,23 +355,53 @@
   }
 
   /**
-   * Throws a precise, named error if the recipient chip added in
-   * openCompose() is no longer present. Confirmed 2026-08: that chip has
-   * repeatedly survived openCompose()'s own immediate + 2s-later checks but
-   * still ended up missing by the time sendAndConfirm() runs, across four
-   * different commit techniques — pointing at something during the
-   * Mailsuite template flow, not the commit method itself. Called after
-   * each stage in runSendNowFlow() below to pin down exactly which one.
+   * Fills the recipient field for real, authoritatively, at the very end of
+   * the flow — after Mailsuite has already finished touching the compose
+   * DOM (template selected, content inserted, personalized). This is the
+   * NEW STRATEGY (2026-08): rather than continuing to chase why an early
+   * recipient fill (mailto: link, and before that, direct typing) kept
+   * getting silently wiped somewhere during the Mailsuite template flow,
+   * sidestep the question entirely by filling the recipient only after
+   * that flow is done touching the page. Uses the exact same interaction
+   * primitives already proven to work reliably elsewhere in this file —
+   * simulateClick() (used for the Mailsuite icon and template item clicks)
+   * plus simulateTyping()/simulateEnterKey() (real per-character
+   * keydown/input/keyup events + a real Enter keypress, the same approach
+   * that reliably produced a correctly-rendered chip during earlier field
+   * testing, before it was replaced by the mailto: link).
+   *
+   * This is the one authoritative, blocking recipient check in the whole
+   * flow — if the chip still isn't there after this, something is
+   * seriously wrong (or the row's email is malformed) and the send must
+   * not proceed.
    * @param {Element} composeDialog
    * @param {string} to
-   * @param {string} whenDescription - e.g. "right after selecting the Mailsuite template".
+   * @returns {Promise<void>}
    */
-  function assertRecipientStillPresent(composeDialog, to, whenDescription) {
-    const chipSelector = `[email="${to.replace(/"/g, '\\"')}"]`;
-    if (!composeDialog.querySelector(chipSelector)) {
+  async function fillRecipientAtEnd(composeDialog, to) {
+    const toField = await dom.waitFor(() => dom.queryAny(composeDialog, dom.GMAIL.toField), {
+      timeoutMs: ACTION_TIMEOUT_MS,
+      description: 'the To field inside the compose dialog (GMAIL.toField), to fill the recipient at the end',
+      target: composeDialog,
+    });
+
+    dom.simulateClick(toField);
+    dom.simulateTyping(toField, to);
+    dom.simulateEnterKey(toField);
+
+    try {
+      await dom.waitFor(() => composeDialog.querySelector(`[email="${to.replace(/"/g, '\\"')}"]`), {
+        timeoutMs: ACTION_TIMEOUT_MS,
+        description: `a recipient chip for "${to}" to appear after clicking + typing into the To field (end-of-flow fill)`,
+        target: composeDialog,
+      });
+    } catch (error) {
+      const anyEmailElements = Array.from(composeDialog.querySelectorAll('[email]'));
+      const emailAttrValues = anyEmailElements.map((el) => el.getAttribute('email'));
       throw new Error(
-        `Recipient chip for "${to}" is missing ${whenDescription} — it was present right after commit in ` +
-          'openCompose() (verified there twice, 2s apart) but is gone now.',
+        `${error.message} Found ${anyEmailElements.length} element(s) with an email="..." attribute in the ` +
+          `compose dialog at all (values: ${JSON.stringify(emailAttrValues)}). Current To field value: ` +
+          `${JSON.stringify(toField.value ?? toField.textContent ?? '')}.`,
       );
     }
   }
@@ -376,6 +413,15 @@
    * listener below), which reports them back to the background service
    * worker. Matches the old automation.js's per-row isolation philosophy:
    * one row's failure is reported precisely, not silently retried or hidden.
+   *
+   * NEW STRATEGY (2026-08): the recipient is filled LAST, after Mailsuite's
+   * template selection/insertion/personalization are all done — not first.
+   * Every earlier approach (mailto: link, and before that, direct typing)
+   * filled the recipient before Mailsuite touched the page, and the chip
+   * kept getting silently wiped somewhere during that flow across multiple
+   * different fill techniques — pointing at something Mailsuite's own flow
+   * does to the compose form, not the fill method. Filling afterward
+   * sidesteps that entirely instead of continuing to chase its root cause.
    * @param {{to: string, name: string, company: string}} row
    * @param {{mailsuiteTemplateName: string, subject: string, placeholders: {name: string, company: string}}} mailsuiteConfig
    * @returns {Promise<{success: true, replacedCount: number}>}
@@ -383,17 +429,14 @@
   async function runSendNowFlow(row, mailsuiteConfig) {
     const composeDialog = await openCompose(row.to, mailsuiteConfig.subject);
 
-    const lengthBeforeInsert = await selectMailsuiteTemplate(composeDialog, mailsuiteConfig.mailsuiteTemplateName, row.to);
-    assertRecipientStillPresent(composeDialog, row.to, 'right after selecting the Mailsuite template (before the body-insertion wait)');
-
+    const lengthBeforeInsert = await selectMailsuiteTemplate(composeDialog, mailsuiteConfig.mailsuiteTemplateName);
     const bodyField = await waitForTemplateInsertion(composeDialog, lengthBeforeInsert);
-    assertRecipientStillPresent(composeDialog, row.to, 'right after the template body finished inserting');
-
     const replacedCount = personalize(bodyField, mailsuiteConfig.placeholders, {
       name: row.name,
       company: row.company,
     });
-    assertRecipientStillPresent(composeDialog, row.to, 'right after personalizing the body');
+
+    await fillRecipientAtEnd(composeDialog, row.to);
 
     await sendAndConfirm(composeDialog);
     return { success: true, replacedCount };
