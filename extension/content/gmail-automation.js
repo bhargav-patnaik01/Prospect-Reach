@@ -385,16 +385,45 @@
    * @param {string} to
    * @returns {Promise<void>}
    */
+  /** Describes an element for diagnostic logging — tag/id/class/name/aria-label/value, not a full outerHTML dump. */
+  function describeElement(el) {
+    if (!el) return 'null';
+    return (
+      `<${el.tagName?.toLowerCase()} id=${JSON.stringify(el.id)} name=${JSON.stringify(el.getAttribute?.('name'))} ` +
+      `class=${JSON.stringify(el.className)} aria-label=${JSON.stringify(el.getAttribute?.('aria-label'))} ` +
+      `role=${JSON.stringify(el.getAttribute?.('role'))} contenteditable=${JSON.stringify(el.getAttribute?.('contenteditable'))} ` +
+      `value=${JSON.stringify(el.value)} textContent=${JSON.stringify(el.textContent?.slice(0, 80))} ` +
+      `connected=${el.isConnected}>`
+    );
+  }
+
   async function fillRecipientAtEnd(composeDialog, to) {
     const toField = await dom.waitFor(() => dom.queryAny(composeDialog, dom.GMAIL.toField), {
       timeoutMs: ACTION_TIMEOUT_MS,
       description: 'the To field inside the compose dialog (GMAIL.toField), to fill the recipient at the end',
       target: composeDialog,
     });
+    console.log(`[Prospect Reach] fillRecipientAtEnd: found toField ${describeElement(toField)}`);
 
     dom.simulateClick(toField);
+    console.log(`[Prospect Reach] fillRecipientAtEnd: after simulateClick, toField is ${describeElement(toField)}; ` +
+      `document.activeElement=${describeElement(document.activeElement)}`);
+
     dom.simulateTyping(toField, to);
+    console.log(`[Prospect Reach] fillRecipientAtEnd: after simulateTyping, toField is ${describeElement(toField)}`);
+
     dom.simulateEnterKey(toField);
+    console.log(`[Prospect Reach] fillRecipientAtEnd: after simulateEnterKey, toField is ${describeElement(toField)}`);
+
+    // Re-query fresh in case Gmail swapped in a different element for the
+    // same logical "To field" (e.g. re-rendering the header on focus/typing)
+    // — if this differs from the original toField reference, that's the
+    // likely explanation for typed characters not surviving.
+    const toFieldNow = dom.queryAny(composeDialog, dom.GMAIL.toField);
+    console.log(
+      `[Prospect Reach] fillRecipientAtEnd: re-queried GMAIL.toField after typing+Enter: ${describeElement(toFieldNow)}; ` +
+        `same element as before=${toFieldNow === toField}`,
+    );
 
     try {
       await dom.waitFor(() => composeDialog.querySelector(`[email="${to.replace(/"/g, '\\"')}"]`), {
@@ -405,10 +434,12 @@
     } catch (error) {
       const anyEmailElements = Array.from(composeDialog.querySelectorAll('[email]'));
       const emailAttrValues = anyEmailElements.map((el) => el.getAttribute('email'));
+      const allToFieldCandidates = Array.from(composeDialog.querySelectorAll(dom.GMAIL.toField.join(',')));
       throw new Error(
         `${error.message} Found ${anyEmailElements.length} element(s) with an email="..." attribute in the ` +
-          `compose dialog at all (values: ${JSON.stringify(emailAttrValues)}). Current To field value: ` +
-          `${JSON.stringify(toField.value ?? toField.textContent ?? '')}.`,
+          `compose dialog at all (values: ${JSON.stringify(emailAttrValues)}). Original toField now: ` +
+          `${describeElement(toField)}. Currently ${allToFieldCandidates.length} element(s) match GMAIL.toField ` +
+          `selectors in the compose dialog: ${allToFieldCandidates.map(describeElement).join(' | ')}.`,
       );
     }
   }
