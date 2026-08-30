@@ -87,31 +87,22 @@
       { timeoutMs: ACTION_TIMEOUT_MS, description: 'a compose dialog to open after clicking a mailto: link' },
     );
 
-    // TEMPORARY (2026-08): recipient/subject verification below is
-    // DOWNGRADED from throw to console.warn, on explicit request, purely to
-    // get past the known-broken mailto: recipient fill and observe whether
-    // Mailsuite's template still loads into the body — the recipient bug
-    // itself is being deliberately deferred, not fixed here. REVERT this
-    // block (restore the `throw new Error(...)` calls) once the recipient
-    // fix lands; sending for real with an empty/wrong recipient is exactly
-    // the failure this sanity-check exists to prevent.
-    const recipientChipFound = await dom
-      .waitFor(() => composeDialog.querySelector(`[email="${to.replace(/"/g, '\\"')}"]`), {
+    // Sanity-check Gmail actually pre-filled the recipient rather than
+    // assuming it and finding out only much later (see this function's
+    // history above — that's exactly what went wrong before).
+    try {
+      await dom.waitFor(() => composeDialog.querySelector(`[email="${to.replace(/"/g, '\\"')}"]`), {
         timeoutMs: ACTION_TIMEOUT_MS,
         description: `a recipient chip for "${to}" to be pre-filled via the mailto: link`,
         target: composeDialog,
-      })
-      .catch((error) => {
-        const anyEmailElements = Array.from(composeDialog.querySelectorAll('[email]'));
-        console.warn(
-          `[Prospect Reach] ${error.message} Found ${anyEmailElements.length} element(s) with an ` +
-            `email="..." attribute in the compose dialog at all. Continuing anyway (recipient check ` +
-            'downgraded to a warning) — DO NOT actually click Send while this is in effect.',
-        );
-        return null;
       });
-    if (!recipientChipFound) {
-      console.warn('[Prospect Reach] Proceeding without a confirmed recipient — for template-loading verification only.');
+    } catch (error) {
+      const anyEmailElements = Array.from(composeDialog.querySelectorAll('[email]'));
+      const emailAttrValues = anyEmailElements.map((el) => el.getAttribute('email'));
+      throw new Error(
+        `${error.message} Found ${anyEmailElements.length} element(s) with an email="..." attribute in the ` +
+          `compose dialog at all (values: ${JSON.stringify(emailAttrValues)}).`,
+      );
     }
 
     const subjectField = await dom.waitFor(() => dom.queryAny(composeDialog, dom.GMAIL.subjectField), {
@@ -119,18 +110,18 @@
       description: 'the Subject field inside the compose dialog (GMAIL.subjectField)',
       target: composeDialog,
     });
-    await dom
-      .waitFor(() => subjectField.value === subject, {
+    try {
+      await dom.waitFor(() => subjectField.value === subject, {
         timeoutMs: ACTION_TIMEOUT_MS,
         description: `the Subject field to be pre-filled with "${subject}" via the mailto: link`,
         target: composeDialog,
-      })
-      .catch((error) => {
-        console.warn(
-          `[Prospect Reach] ${error.message} Subject field's actual current value: ` +
-            `${JSON.stringify(subjectField.value)}. Continuing anyway (subject check downgraded to a warning).`,
-        );
       });
+    } catch (error) {
+      // subjectField.value is read fresh here, not baked into the
+      // description above — description strings are built once,
+      // synchronously, when waitFor() is called.
+      throw new Error(`${error.message} Subject field's actual current value: ${JSON.stringify(subjectField.value)}.`);
+    }
 
     return composeDialog;
   }
@@ -357,21 +348,13 @@
   }
 
   /**
-   * Logs (does NOT throw — see TEMPORARY note below) when the recipient
-   * chip added in openCompose() is no longer present. Confirmed 2026-08:
-   * that chip has repeatedly survived openCompose()'s own immediate +
-   * 2s-later checks but still ended up missing by the time
-   * sendAndConfirm() runs, across four different commit techniques —
-   * pointing at something during the Mailsuite template flow, not the
-   * commit method itself. Called after each stage in runSendNowFlow()
-   * below to pin down exactly which one.
-   *
-   * TEMPORARY (2026-08): downgraded from throw to console.warn, on
-   * explicit request, purely to observe whether Mailsuite's template still
-   * loads into the body despite the known-broken recipient. REVERT to
-   * throwing once the recipient bug is fixed — this function existing at
-   * all is specifically to stop an automated send with a missing/wrong
-   * recipient, and right now it can't.
+   * Throws a precise, named error if the recipient chip added in
+   * openCompose() is no longer present. Confirmed 2026-08: that chip has
+   * repeatedly survived openCompose()'s own immediate + 2s-later checks but
+   * still ended up missing by the time sendAndConfirm() runs, across four
+   * different commit techniques — pointing at something during the
+   * Mailsuite template flow, not the commit method itself. Called after
+   * each stage in runSendNowFlow() below to pin down exactly which one.
    * @param {Element} composeDialog
    * @param {string} to
    * @param {string} whenDescription - e.g. "right after selecting the Mailsuite template".
@@ -379,10 +362,9 @@
   function assertRecipientStillPresent(composeDialog, to, whenDescription) {
     const chipSelector = `[email="${to.replace(/"/g, '\\"')}"]`;
     if (!composeDialog.querySelector(chipSelector)) {
-      console.warn(
-        `[Prospect Reach] Recipient chip for "${to}" is missing ${whenDescription} — it was present right ` +
-          'after commit in openCompose() (verified there twice, 2s apart) but is gone now. Continuing anyway ' +
-          '(recipient check downgraded to a warning) — DO NOT actually click Send while this is in effect.',
+      throw new Error(
+        `Recipient chip for "${to}" is missing ${whenDescription} — it was present right after commit in ` +
+          'openCompose() (verified there twice, 2s apart) but is gone now.',
       );
     }
   }
@@ -398,16 +380,6 @@
    * @param {{mailsuiteTemplateName: string, subject: string, placeholders: {name: string, company: string}}} mailsuiteConfig
    * @returns {Promise<{success: true, replacedCount: number}>}
    */
-  // TEMPORARY (2026-08): when true, runSendNowFlow() stops right after
-  // personalizing the body and does NOT call sendAndConfirm() — on explicit
-  // request, to observe Mailsuite's template loading/personalization in a
-  // real compose window without risking an actual send while the recipient
-  // fill is known-broken (see openCompose()'s and assertRecipientStillPresent()'s
-  // downgraded-to-warning checks above). Set back to false (or delete this
-  // flag and the branch below) once the recipient bug is fixed and real
-  // sends are safe again.
-  const SKIP_ACTUAL_SEND_FOR_TEMPLATE_VERIFICATION = true;
-
   async function runSendNowFlow(row, mailsuiteConfig) {
     const composeDialog = await openCompose(row.to, mailsuiteConfig.subject);
 
@@ -422,15 +394,6 @@
       company: row.company,
     });
     assertRecipientStillPresent(composeDialog, row.to, 'right after personalizing the body');
-
-    if (SKIP_ACTUAL_SEND_FOR_TEMPLATE_VERIFICATION) {
-      console.warn(
-        '[Prospect Reach] Skipping the actual Send click (SKIP_ACTUAL_SEND_FOR_TEMPLATE_VERIFICATION=true) — ' +
-          'template loaded and personalized; the compose window is left open for you to inspect. ' +
-          'Nothing was sent.',
-      );
-      return { success: true, replacedCount, skippedSend: true };
-    }
 
     await sendAndConfirm(composeDialog);
     return { success: true, replacedCount };
