@@ -372,7 +372,8 @@
         `${error.message} composeDialog still in document: ${document.body.contains(composeDialog)}; ` +
           `${emailElements.length} [email] element(s) currently in the compose dialog` +
           `${emailElements.length ? ` (${emailElementDetails})` : ''}; ` +
-          `Subject field current value: ${JSON.stringify(currentSubjectField?.value ?? 'field not found')}.`,
+          `Subject field current value: ${JSON.stringify(currentSubjectField?.value ?? 'field not found')}; ` +
+          `sendButton after the click attempt: ${describeElement(sendButton)}.`,
       );
     }
   }
@@ -412,6 +413,10 @@
       `<${el.tagName?.toLowerCase()} id=${JSON.stringify(el.id)} name=${JSON.stringify(el.getAttribute?.('name'))} ` +
       `class=${JSON.stringify(el.className)} aria-label=${JSON.stringify(el.getAttribute?.('aria-label'))} ` +
       `role=${JSON.stringify(el.getAttribute?.('role'))} contenteditable=${JSON.stringify(el.getAttribute?.('contenteditable'))} ` +
+      `data-tooltip=${JSON.stringify(el.getAttribute?.('data-tooltip'))} ` +
+      `disabled=${JSON.stringify(el.disabled)} aria-disabled=${JSON.stringify(el.getAttribute?.('aria-disabled'))} ` +
+      `tabindex=${JSON.stringify(el.getAttribute?.('tabindex'))} ` +
+      `rect=${el.getBoundingClientRect ? JSON.stringify((({ x, y, width, height }) => ({ x, y, width, height }))(el.getBoundingClientRect())) : 'n/a'} ` +
       `value=${JSON.stringify(el.value)} textContent=${JSON.stringify(el.textContent?.slice(0, 80))} ` +
       `connected=${el.isConnected}>`
     );
