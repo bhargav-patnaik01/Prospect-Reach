@@ -51,7 +51,18 @@
     toField: ['textarea[name="to"]', 'input[aria-label^="To"]'],
     subjectField: ['input[name="subjectbox"]'],
     bodyField: ['div[aria-label="Message Body"][role="textbox"]', 'div[g_editable="true"][role="textbox"]'],
-    sendButton: ['div[role="button"][data-tooltip^="Send"]'],
+    // Broadened (2026-08) — this selector had never actually been exercised
+    // against a live Gmail session until every earlier step (recipient,
+    // template, personalization) started working; `^="Send"` (starts-with)
+    // may be too strict if Gmail's real tooltip has a leading Unicode
+    // bidi-control character or otherwise doesn't start with a literal "S".
+    // `*=` (contains, case-insensitive) candidates added as fallbacks;
+    // sendAndConfirm() also falls back further to a text-based search.
+    sendButton: [
+      'div[role="button"][data-tooltip^="Send"]',
+      'div[role="button"][data-tooltip*="send" i]',
+      'div[role="button"][aria-label*="send" i]',
+    ],
   };
 
   // BEST-GUESS PLACEHOLDERS — see file header. Ordered most- to

@@ -314,10 +314,26 @@
    * @param {Element} composeDialog
    */
   async function sendAndConfirm(composeDialog) {
-    const sendButton = dom.queryAny(composeDialog, dom.GMAIL.sendButton);
+    // Text-based fallback alongside GMAIL.sendButton's CSS candidates — the
+    // visible label is reliably just "Send", regardless of what its
+    // data-tooltip/aria-label attributes turn out to actually be on this
+    // Gmail version (unverified against a live session until now, since
+    // every earlier step in the flow had been failing before this point).
+    const sendButton =
+      dom.queryAny(composeDialog, dom.GMAIL.sendButton) ??
+      dom.findByText(composeDialog, 'div[role="button"]', /^send$/i);
     if (!sendButton) {
-      throw new Error('Could not find the Send button (GMAIL.sendButton) in the compose dialog.');
+      const allRoleButtons = Array.from(composeDialog.querySelectorAll('div[role="button"]'));
+      const buttonSummaries = allRoleButtons
+        .slice(0, 15)
+        .map((el) => `${JSON.stringify(el.textContent?.trim().slice(0, 20))}(tooltip=${JSON.stringify(el.getAttribute('data-tooltip'))})`)
+        .join(', ');
+      throw new Error(
+        'Could not find the Send button (GMAIL.sendButton, nor a div[role="button"] with text "Send"). ' +
+          `Found ${allRoleButtons.length} div[role="button"] element(s) in the compose dialog: ${buttonSummaries}.`,
+      );
     }
+    console.log(`[Prospect Reach] sendAndConfirm: clicking sendButton ${describeElement(sendButton)}`);
     dom.simulateClick(sendButton);
 
     try {
