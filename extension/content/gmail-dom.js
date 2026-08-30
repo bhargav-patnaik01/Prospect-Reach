@@ -241,6 +241,30 @@
   }
 
   /**
+   * Simulates Gmail's native "send" keyboard shortcut (Ctrl+Enter on
+   * Windows/Linux, Cmd+Enter on Mac — both dispatched together since we
+   * don't know the platform at this layer and Gmail typically accepts
+   * either). Added (2026-08) on the theory that Mailsuite's send-tracking
+   * wrapper (confirmed present — the native Send button carries an
+   * `mt-send` class) only hooks the button's click handler, not Gmail's
+   * own separate keyboard-shortcut listener, so this may reach Gmail's
+   * real send action directly even though a synthetic click on the button
+   * itself does not (confirmed 2026-08: a real, correctly-clicked Send
+   * button produced no actual send).
+   * @param {Element} el - typically the compose body field, focused first.
+   */
+  function simulateCtrlEnter(el) {
+    el.focus();
+    const base = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+    el.dispatchEvent(new KeyboardEvent('keydown', { ...base, ctrlKey: true }));
+    el.dispatchEvent(new KeyboardEvent('keypress', { ...base, ctrlKey: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { ...base, ctrlKey: true }));
+    el.dispatchEvent(new KeyboardEvent('keydown', { ...base, metaKey: true }));
+    el.dispatchEvent(new KeyboardEvent('keypress', { ...base, metaKey: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { ...base, metaKey: true }));
+  }
+
+  /**
    * Replaces every occurrence of each `replacements` key with its value,
    * across all text nodes under `el`, in place — preserving whatever HTML
    * structure/formatting Mailsuite's template inserted (bold, links, line
@@ -320,6 +344,7 @@
     simulateClick,
     simulateTyping,
     simulateEnterKey,
+    simulateCtrlEnter,
     replaceTextInElement,
   };
 })();

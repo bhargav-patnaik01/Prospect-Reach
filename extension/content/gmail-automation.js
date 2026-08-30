@@ -336,6 +336,24 @@
     console.log(`[Prospect Reach] sendAndConfirm: clicking sendButton ${describeElement(sendButton)}`);
     dom.simulateClick(sendButton);
 
+    // Fallback (2026-08): confirmed a real, correctly-clicked native Send
+    // button (visible, enabled, right element) does NOT actually send the
+    // message — the button carries an `mt-send` class, meaning Mailsuite
+    // wraps it with its own tracking click handler, which likely only acts
+    // on browser-trusted clicks (event.isTrusted), something no page-level
+    // JavaScript can fake via dispatchEvent(). Also try Gmail's native
+    // Ctrl+Enter/Cmd+Enter "send" keyboard shortcut on the body field, on
+    // the theory that Mailsuite hooked the button specifically and not
+    // Gmail's separate keyboard-shortcut listener — if this also doesn't
+    // work, that confirms an isTrusted-style block rather than a
+    // button-specific one, and a synthetic-event approach can't solve it
+    // at all (would need chrome.debugger's CDP-level trusted input instead).
+    const bodyFieldForShortcut = dom.queryAny(composeDialog, dom.GMAIL.bodyField);
+    if (bodyFieldForShortcut) {
+      console.log('[Prospect Reach] sendAndConfirm: also trying Ctrl+Enter/Cmd+Enter on the body field, in case the button click alone is being ignored.');
+      dom.simulateCtrlEnter(bodyFieldForShortcut);
+    }
+
     try {
       await Promise.race([
         dom.waitFor(() => dom.findByText(document, 'div,span', dom.SENT_TOAST_TEXT), {
