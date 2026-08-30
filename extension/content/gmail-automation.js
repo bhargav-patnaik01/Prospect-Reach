@@ -99,30 +99,37 @@
       { timeoutMs: ACTION_TIMEOUT_MS, description: 'a compose dialog to open after clicking a mailto: link' },
     );
 
-    // Best-effort only — see this function's NEW STRATEGY note above. The
-    // authoritative recipient fill+check happens at the end of
-    // runSendNowFlow() via fillRecipientAtEnd(), not here.
-    await dom
-      .waitFor(() => composeDialog.querySelector(`[email="${to.replace(/"/g, '\\"')}"]`), {
-        timeoutMs: ACTION_TIMEOUT_MS,
-        description: `a recipient chip for "${to}" to be pre-filled via the mailto: link`,
-        target: composeDialog,
-      })
-      .catch((error) => {
-        console.warn(
-          `[Prospect Reach] ${error.message} (non-fatal — this is only a best-effort early attempt; ` +
-            'the real recipient fill happens at the end, via fillRecipientAtEnd()).',
-        );
-      });
+    // Best-effort, instant check only — NOT a poll/wait. See this
+    // function's NEW STRATEGY note above: the authoritative recipient
+    // fill+check happens at the end of runSendNowFlow() via
+    // fillRecipientAtEnd(), which is going to run regardless of what this
+    // finds. Polling for up to ACTION_TIMEOUT_MS here was pure wasted
+    // time — confirmed 2026-08 the mailto: link's recipient fill is
+    // unreliable, so this consistently burned the full timeout on
+    // essentially every row before Mailsuite's icon was even clicked. A
+    // single synchronous check costs nothing and is just as informative
+    // for the console.warn below.
+    if (!composeDialog.querySelector(`[email="${to.replace(/"/g, '\\"')}"]`)) {
+      console.warn(
+        `[Prospect Reach] No recipient chip for "${to}" immediately after the mailto: link click ` +
+          '(non-fatal — this is only a best-effort early attempt; the real recipient fill happens at the ' +
+          'end, via fillRecipientAtEnd()).',
+      );
+    }
 
     const subjectField = await dom.waitFor(() => dom.queryAny(composeDialog, dom.GMAIL.subjectField), {
       timeoutMs: ACTION_TIMEOUT_MS,
       description: 'the Subject field inside the compose dialog (GMAIL.subjectField)',
       target: composeDialog,
     });
+    // Subject IS still relied on (unlike the recipient above) — but capped
+    // to a much shorter timeout than ACTION_TIMEOUT_MS, since this is still
+    // only a best-effort/non-fatal check (see the .catch() below) and
+    // there's no reason to let it burn 15s if the mailto: link's subject
+    // fill turns out to be as unreliable as its recipient fill was.
     await dom
       .waitFor(() => subjectField.value === subject, {
-        timeoutMs: ACTION_TIMEOUT_MS,
+        timeoutMs: 3000,
         description: `the Subject field to be pre-filled with "${subject}" via the mailto: link`,
         target: composeDialog,
       })
