@@ -46,6 +46,15 @@
 
     <section class="step">
       <h2>4. Run</h2>
+      <label for="gmail-account-index">
+        Gmail account number
+        <input id="gmail-account-index" type="number" min="0" step="1" value="0" />
+      </label>
+      <p class="placeholder-note">
+        The <code>u/<em>N</em></code> in your Gmail URL (e.g. mail.google.com/mail/<strong>u/1</strong>/#inbox
+        if Gmail is your second signed-in account) — the dedicated tab this extension
+        opens uses this account number. Saved for next time.
+      </p>
       <button id="run-campaign" type="button" disabled title="Not built yet — full multi-row batch running is a later sprint">
         Run Campaign (coming soon)
       </button>
@@ -57,13 +66,15 @@
       <details class="dev-tools">
         <summary>Developer: send one test row now (Sprint 6 manual verification)</summary>
         <p class="placeholder-note">
-          Sends <strong>row 1 of your current review table</strong> for real, through a
-          dedicated Gmail tab this extension opens — this actually sends an email if a
-          real Gmail/Mailsuite session is active. Not part of the eventual rep-facing UI;
-          this exists only so a human can verify Sprint 6's automation end to end.
+          Sends <strong>the first ready row of your current review table</strong> (not
+          necessarily spreadsheet row 1 — rows with errors or warnings are skipped) for
+          real, through a dedicated Gmail tab this extension opens — this actually sends
+          an email if a real Gmail/Mailsuite session is active. Not part of the eventual
+          rep-facing UI; this exists only so a human can verify Sprint 6's automation end
+          to end.
         </p>
         <button id="send-test-row" type="button" class="secondary" disabled>
-          Send test row (row 1)
+          Send test row
         </button>
         <p id="test-row-status" class="status" role="status"></p>
       </details>

@@ -45,9 +45,19 @@
  */
 import { buildMailsuiteConfigMap } from './lib/mailsuite-config.js';
 
-const GMAIL_URL = 'https://mail.google.com/mail/u/0/#inbox';
 const TAB_LOAD_TIMEOUT_MS = 30000;
 const ROW_RUN_STORAGE_KEY = 'prospectReachLastRun';
+const CONTENT_SCRIPT_READY_ATTEMPTS = 15;
+const CONTENT_SCRIPT_READY_RETRY_DELAY_MS = 300;
+// Re-inject (rather than just re-ping) every few attempts: chrome.tabs
+// onUpdated's 'complete' event can fire for an intermediate Gmail
+// navigation (Gmail bounces through auth/redirect steps before its SPA
+// settles on #inbox), so the first executeScript call can land on a page
+// that then navigates again and wipes the injected script. A bare retry
+// loop of pings would hang forever in that case since no listener will
+// ever answer; re-injecting periodically recovers once the tab has
+// actually settled on the real Gmail page.
+const CONTENT_SCRIPT_REINJECT_EVERY_N_ATTEMPTS = 5;
 
 chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
@@ -75,12 +85,36 @@ async function loadMailsuiteConfigMap() {
 }
 
 /**
+ * Builds the Gmail inbox URL for a given signed-in account slot — the
+ * `u/N` segment is per-browser-profile (which Google accounts are signed
+ * in, and in what order), not something the extension can detect, hence
+ * the side panel's "Gmail account number" setting (see sidepanel.html/js)
+ * feeding this rather than a hardcoded u/0.
+ *
+ * NOTE: a `view=cm&to=&su=` compose-prefill URL was tried here (2026-08) to
+ * sidestep simulating the To field's autocomplete entirely — it reliably
+ * pre-filled the recipient/subject, but that compose window didn't get
+ * Mailsuite's toolbar button injected into it at all (Mailsuite apparently
+ * doesn't hook URL-triggered compose the same way it hooks a manual
+ * Compose-button click), which is a hard blocker since Mailsuite is central
+ * to this flow. Reverted back to opening the plain inbox and clicking
+ * Compose; the recipient-commit fix needs to happen inside that flow
+ * instead — see gmail-automation.js's openCompose().
+ * @param {number} accountIndex
+ * @returns {string}
+ */
+function buildGmailUrl(accountIndex) {
+  return `https://mail.google.com/mail/u/${accountIndex}/#inbox`;
+}
+
+/**
  * Opens a dedicated Gmail tab and resolves once it's finished loading.
+ * @param {number} accountIndex
  * @returns {Promise<number>} the new tab's id.
  */
-function openDedicatedGmailTab() {
+function openDedicatedGmailTab(accountIndex) {
   return new Promise((resolve, reject) => {
-    chrome.tabs.create({ url: GMAIL_URL, active: true }, (tab) => {
+    chrome.tabs.create({ url: buildGmailUrl(accountIndex), active: true }, (tab) => {
       if (chrome.runtime.lastError || !tab?.id) {
         reject(new Error(chrome.runtime.lastError?.message ?? 'chrome.tabs.create returned no tab id'));
         return;
@@ -112,14 +146,52 @@ async function injectContentScript(tabId) {
   });
 }
 
+/** True if `error` looks like "no content script is listening in this tab". */
+function isNoReceivingEndError(error) {
+  return /Receiving end does not exist|Could not establish connection/.test(error?.message ?? '');
+}
+
+/**
+ * Confirms the injected content script is actually alive and its
+ * chrome.runtime.onMessage listener is registered, before handing it real
+ * work — injection resolving is not proof of that (see
+ * CONTENT_SCRIPT_REINJECT_EVERY_N_ATTEMPTS above for why). Pings with
+ * PROSPECT_REACH_PING and retries; periodically re-injects (idempotent on
+ * both content script files — see their window.__prospectReach* guards) in
+ * case the tab navigated again and wiped the first injection.
+ * @param {number} tabId
+ */
+async function waitForContentScriptReady(tabId) {
+  for (let attempt = 1; attempt <= CONTENT_SCRIPT_READY_ATTEMPTS; attempt++) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, { type: 'PROSPECT_REACH_PING' });
+      if (response?.ready) return;
+    } catch (error) {
+      if (!isNoReceivingEndError(error)) throw error;
+    }
+
+    if (attempt % CONTENT_SCRIPT_REINJECT_EVERY_N_ATTEMPTS === 0) {
+      await injectContentScript(tabId);
+    }
+    await new Promise((resolve) => setTimeout(resolve, CONTENT_SCRIPT_READY_RETRY_DELAY_MS));
+  }
+
+  throw new Error(
+    `Content script in tab ${tabId} never responded to a readiness ping after ` +
+      `${CONTENT_SCRIPT_READY_ATTEMPTS} attempts (~` +
+      `${Math.round((CONTENT_SCRIPT_READY_ATTEMPTS * CONTENT_SCRIPT_READY_RETRY_DELAY_MS) / 1000)}s).`,
+  );
+}
+
 /**
  * Runs the full single-row send-now flow: dedicated tab -> inject -> one
  * row message -> one reply. This is the whole orchestration skeleton this
  * sprint proves out before Sprint 7 loops it over a batch.
  * @param {{name: string, email: string, company: string, category: string}} row
+ * @param {number} gmailAccountIndex - the `u/N` Gmail account slot to open (see buildGmailUrl).
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-async function runSingleRow(row) {
+async function runSingleRow(row, gmailAccountIndex) {
   await chrome.storage.session.set({ [ROW_RUN_STORAGE_KEY]: { row, status: 'starting' } });
 
   const configMap = await loadMailsuiteConfigMap();
@@ -130,11 +202,14 @@ async function runSingleRow(row) {
     return result;
   }
 
-  const tabId = await openDedicatedGmailTab();
+  const tabId = await openDedicatedGmailTab(gmailAccountIndex);
   await chrome.storage.session.set({ [ROW_RUN_STORAGE_KEY]: { row, status: 'tab-open', tabId } });
 
   await injectContentScript(tabId);
   await chrome.storage.session.set({ [ROW_RUN_STORAGE_KEY]: { row, status: 'script-injected', tabId } });
+
+  await waitForContentScriptReady(tabId);
+  await chrome.storage.session.set({ [ROW_RUN_STORAGE_KEY]: { row, status: 'script-ready', tabId } });
 
   const result = await chrome.tabs.sendMessage(tabId, {
     type: 'PROSPECT_REACH_RUN_ROW',
@@ -149,7 +224,7 @@ async function runSingleRow(row) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== 'PROSPECT_REACH_SEND_TEST_ROW') return undefined;
 
-  runSingleRow(message.row)
+  runSingleRow(message.row, Number(message.gmailAccountIndex) || 0)
     .then((result) => sendResponse(result))
     .catch((error) => sendResponse({ success: false, error: error.message }));
 

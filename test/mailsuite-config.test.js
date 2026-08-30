@@ -1,11 +1,11 @@
 /**
  * Proves src/mailsuite-config.js — copied verbatim into
  * extension/lib/mailsuite-config.js — loads correctly against the real
- * (fixture-valued) templates/categories/*.json files, and rejects malformed
- * config loudly rather than silently. Real Mailsuite template names/
- * placeholder strings aren't available yet (see PROJECT_CALIBRATION.md's
- * Sprint 6 notes) — this only proves the loading/validation code is
- * correct, not that the fixture values are real.
+ * templates/categories/*.json files, and rejects malformed config loudly
+ * rather than silently. `partnership.json` was patched with real Mailsuite
+ * data during Sprint 6's manual verification pass (see PROJECT_CALIBRATION.md);
+ * cold-outreach and newsletter still carry FIXTURE placeholders pending
+ * their own verification passes.
  */
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
@@ -33,9 +33,10 @@ test('buildMailsuiteConfigMap: loads every real category file into a lower-cased
 
   const partnership = map.get('partnership');
   assert.equal(partnership.categoryName, 'Partnership');
-  assert.match(partnership.mailsuiteTemplateName, /^FIXTURE/, 'fixture values must be obviously fake, not real-looking');
-  assert.equal(partnership.placeholders.name, '{{FirstName}}');
-  assert.equal(partnership.placeholders.company, '{{Company}}');
+  assert.equal(partnership.mailsuiteTemplateName, 'School Outreach Template');
+  assert.equal(partnership.subject, 'TEST SUBJECT — Partnership outreach (replace with a real subject line)');
+  assert.equal(partnership.placeholders.name, '[Principal Name]');
+  assert.equal(partnership.placeholders.company, '[School Name]');
 });
 
 test('parseMailsuiteConfig: throws loudly on a missing mailsuiteTemplateName', () => {
@@ -45,9 +46,16 @@ test('parseMailsuiteConfig: throws loudly on a missing mailsuiteTemplateName', (
   );
 });
 
-test('parseMailsuiteConfig: throws loudly on missing placeholders', () => {
+test('parseMailsuiteConfig: throws loudly on a missing subject', () => {
   assert.throws(
     () => parseMailsuiteConfig({ name: 'Broken', mailsuiteTemplateName: 'Some Template' }),
+    /missing "subject"/,
+  );
+});
+
+test('parseMailsuiteConfig: throws loudly on missing placeholders', () => {
+  assert.throws(
+    () => parseMailsuiteConfig({ name: 'Broken', mailsuiteTemplateName: 'Some Template', subject: 'Some Subject' }),
     /missing "placeholders/,
   );
 });

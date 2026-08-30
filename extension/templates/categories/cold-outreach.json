@@ -1,6 +1,7 @@
 {
   "name": "Cold Outreach",
   "mailsuiteTemplateName": "FIXTURE — Cold Outreach (replace with real Mailsuite template name)",
+  "subject": "TEST SUBJECT — Cold Outreach (replace with a real subject line)",
   "placeholders": {
     "name": "[First Name]",
     "company": "[Company]"

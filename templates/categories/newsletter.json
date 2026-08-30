@@ -1,6 +1,7 @@
 {
   "name": "Newsletter",
   "mailsuiteTemplateName": "FIXTURE — Newsletter (replace with real Mailsuite template name)",
+  "subject": "TEST SUBJECT — Newsletter (replace with a real subject line)",
   "placeholders": {
     "name": "[First Name]",
     "company": "[Company]"

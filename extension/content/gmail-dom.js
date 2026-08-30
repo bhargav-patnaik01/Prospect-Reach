@@ -29,10 +29,24 @@
  * `content_scripts` entries share a scope — see manifest.json comments.
  */
 (function () {
+  // Re-injection guard: background.js retries chrome.scripting.executeScript
+  // when the readiness ping fails (e.g. the tab navigated again after the
+  // first inject), and this file + gmail-automation.js may end up injected
+  // more than once into the same still-alive page. Re-running this file is
+  // harmless on its own (it only rebuilds window.__prospectReachGmailDom),
+  // but bail out early anyway so both content scripts share one consistent
+  // "already injected" signal.
+  if (window.__prospectReachGmailDom) return;
+
   const GMAIL = {
-    composeButton: ['div[role="button"][gh="cm"]'],
+    // No composeButton/toField selectors here — openCompose() in
+    // gmail-automation.js opens compose (with recipient/subject pre-filled)
+    // by clicking a mailto: link that Gmail itself intercepts, rather than
+    // clicking Gmail's own Compose button and typing into the To field
+    // directly. See that function's header comment for the full 2026-08
+    // history of why (every direct-typing/pasting approach produced a
+    // recipient chip that looked correct but got silently wiped later).
     composeDialogs: ['div[role="dialog"]'],
-    toField: ['textarea[name="to"]', 'input[aria-label^="To"]'],
     subjectField: ['input[name="subjectbox"]'],
     bodyField: ['div[aria-label="Message Body"][role="textbox"]', 'div[g_editable="true"][role="textbox"]'],
     sendButton: ['div[role="button"][data-tooltip^="Send"]'],
@@ -41,18 +55,34 @@
   // BEST-GUESS PLACEHOLDERS — see file header. Ordered most- to
   // least-specific; the first one that matches a real element wins.
   const MAILSUITE = {
-    icon: [
-      '[aria-label*="Mailsuite" i]',
-      '[data-tooltip*="Mailsuite" i]',
-      '[title*="Mailsuite" i]',
-      'img[src*="mailsuite" i]',
-    ],
+    // Confirmed against real Mailsuite (2026-08): the toolbar button is
+    // <button class="mt-load-template-button" aria-expanded="false">Load
+    // template<svg>...</svg></button> — no aria-label/data-tooltip/title
+    // mentioning "Mailsuite" at all, so none of those placeholder guesses
+    // ever actually matched it.
+    //
+    // Deliberately NOT keeping '[data-tooltip*="Mailsuite" i]' as a
+    // fallback below — the compose toolbar also has a *separate* Mailsuite
+    // Settings button/menu with data-tooltip="Mailsuite Settings"
+    // (class mt-tool-button mt-settings), which that fallback matched
+    // instead of the real template button, opening Settings rather than
+    // the template dropdown. If mt-load-template-button ever goes stale,
+    // fail loudly (timeout) rather than silently opening the wrong panel.
+    icon: ['button.mt-load-template-button'],
+    // Confirmed against the real dropdown (2026-08): no role attributes at
+    // all — it's a plain <ul><li data-template-id="...">Template
+    // Name</li>...</ul> next to a <span class="title">Templates</span>.
+    // No stable selector for the <ul> wrapper itself was captured, so
+    // templateDropdown is left as unverified guesses; selectMailsuiteTemplate()
+    // in gmail-automation.js falls back to aria-expanded="true" on the
+    // button (a confirmed-real signal) and searches the whole document for
+    // templateItem in that case, which is what actually matters here.
     templateDropdown: [
       '[role="listbox"][aria-label*="template" i]',
       '[role="menu"][aria-label*="Mailsuite" i]',
       '.mailsuite-template-list',
     ],
-    templateItem: ['[role="option"]', '[role="menuitem"]'],
+    templateItem: ['li[data-template-id]'],
   };
 
   const SENT_TOAST_TEXT = /message sent/i;
@@ -153,24 +183,11 @@
     el.click();
   }
 
-  /**
-   * Sets a contenteditable/input element's content and fires the events a
-   * real typing session would, so Gmail's/Mailsuite's own JS (which listens
-   * for `input`, not just reads `.value`/`.textContent` once) notices the
-   * change.
-   * @param {Element} el
-   * @param {string} text
-   */
-  function setEditableContent(el, text) {
-    el.focus();
-    if ('value' in el) {
-      el.value = text;
-    } else {
-      el.textContent = text;
-    }
-    el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  }
+  // No pasteText/pressEnter/typeText/setEditableContent helpers here
+  // anymore — they existed to simulate filling Gmail's To/Subject fields
+  // directly, which openCompose() in gmail-automation.js no longer does
+  // (see its header comment for why: a mailto: link click now gets both
+  // fields filled through Gmail's own genuine handling instead).
 
   /**
    * Replaces every occurrence of each `replacements` key with its value,
@@ -220,7 +237,6 @@
     findByText,
     waitFor,
     simulateClick,
-    setEditableContent,
     replaceTextInElement,
   };
 })();

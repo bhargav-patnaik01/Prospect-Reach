@@ -20,6 +20,9 @@ const reviewBody = document.getElementById('review-body');
 const clearBatchButton = document.getElementById('clear-batch');
 const sendTestRowButton = document.getElementById('send-test-row');
 const testRowStatus = document.getElementById('test-row-status');
+const gmailAccountIndexInput = document.getElementById('gmail-account-index');
+
+const GMAIL_ACCOUNT_INDEX_STORAGE_KEY = 'prospectReachGmailAccountIndex';
 
 let currentBatch = null; // { fileName, rawRows, result } — see renderReview()
 
@@ -67,6 +70,7 @@ clearBatchButton.addEventListener('click', async () => {
   await resetBatch();
   currentBatch = null;
   sendTestRowButton.disabled = true;
+  sendTestRowButton.textContent = 'Send test row';
   testRowStatus.textContent = '';
   reviewSection.hidden = true;
   reviewBody.innerHTML = '';
@@ -74,9 +78,17 @@ clearBatchButton.addEventListener('click', async () => {
   uploadStatus.textContent = '';
 });
 
+gmailAccountIndexInput.addEventListener('change', () => {
+  const gmailAccountIndex = Math.max(0, Math.trunc(Number(gmailAccountIndexInput.value)) || 0);
+  gmailAccountIndexInput.value = gmailAccountIndex;
+  chrome.storage.local.set({ [GMAIL_ACCOUNT_INDEX_STORAGE_KEY]: gmailAccountIndex });
+});
+
 sendTestRowButton.addEventListener('click', async () => {
   const row = currentBatch?.result.ready[0];
   if (!row) return;
+
+  const gmailAccountIndex = Math.max(0, Math.trunc(Number(gmailAccountIndexInput.value)) || 0);
 
   sendTestRowButton.disabled = true;
   testRowStatus.classList.remove('error');
@@ -86,6 +98,7 @@ sendTestRowButton.addEventListener('click', async () => {
     const result = await chrome.runtime.sendMessage({
       type: 'PROSPECT_REACH_SEND_TEST_ROW',
       row,
+      gmailAccountIndex,
     });
 
     if (result?.success) {
@@ -119,7 +132,13 @@ function reasonFor(rowNumber, result) {
 
 function renderReview(fileName, rawRows, result) {
   currentBatch = { fileName, rawRows, result };
-  sendTestRowButton.disabled = result.ready.length === 0;
+  const firstReadyRow = result.ready[0];
+  sendTestRowButton.disabled = !firstReadyRow;
+  // The button always sends result.ready[0] — the first row that passed
+  // validation, not literal spreadsheet row 1 — so label it with that row's
+  // real __row number rather than a hardcoded "row 1" that goes stale the
+  // moment an earlier row has an error or warning.
+  sendTestRowButton.textContent = firstReadyRow ? `Send test row (row ${firstReadyRow.__row})` : 'Send test row';
 
   reviewSection.hidden = false;
   summaryLine.textContent =
@@ -160,4 +179,14 @@ function escapeHtml(value) {
     renderReview(batch.fileName, batch.rawRows, batch.result);
     uploadStatus.textContent = `Restored ${batch.fileName} from your last session.`;
   }
+})();
+
+// Restore the saved Gmail account number (chrome.storage.local, not
+// .session — unlike the batch review data, this is a durable user
+// preference that should survive across browser restarts, not just the
+// current session).
+(async () => {
+  const stored = await chrome.storage.local.get(GMAIL_ACCOUNT_INDEX_STORAGE_KEY);
+  const savedIndex = stored[GMAIL_ACCOUNT_INDEX_STORAGE_KEY];
+  if (typeof savedIndex === 'number') gmailAccountIndexInput.value = savedIndex;
 })();

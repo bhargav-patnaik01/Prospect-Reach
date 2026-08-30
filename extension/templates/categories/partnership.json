@@ -1,8 +1,9 @@
 {
   "name": "Partnership",
-  "mailsuiteTemplateName": "FIXTURE — Partnership (replace with real Mailsuite template name)",
+  "mailsuiteTemplateName": "School Outreach Template",
+  "subject": "TEST SUBJECT — Partnership outreach (replace with a real subject line)",
   "placeholders": {
-    "name": "{{FirstName}}",
-    "company": "{{Company}}"
+    "name": "[Principal Name]",
+    "company": "[School Name]"
   }
 }

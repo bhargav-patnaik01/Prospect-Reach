@@ -22,8 +22,8 @@
  * Throws — deliberately, not a warning/error array like validateRows() —
  * because a malformed category config is a repo/data bug for a developer to
  * fix, not row-level user data a rep can be shown a review screen about.
- * @param {{name?: string, mailsuiteTemplateName?: string, placeholders?: {name?: string, company?: string}}} definition
- * @returns {{categoryName: string, mailsuiteTemplateName: string, placeholders: {name: string, company: string}}}
+ * @param {{name?: string, mailsuiteTemplateName?: string, subject?: string, placeholders?: {name?: string, company?: string}}} definition
+ * @returns {{categoryName: string, mailsuiteTemplateName: string, subject: string, placeholders: {name: string, company: string}}}
  */
 export function parseMailsuiteConfig(definition) {
   const categoryName = definition?.name?.trim();
@@ -39,6 +39,11 @@ export function parseMailsuiteConfig(definition) {
     );
   }
 
+  const subject = definition?.subject?.trim();
+  if (!subject) {
+    throw new Error(`Category "${categoryName}" is missing "subject" — every category needs a subject line.`);
+  }
+
   const namePlaceholder = definition?.placeholders?.name?.trim();
   const companyPlaceholder = definition?.placeholders?.company?.trim();
   if (!namePlaceholder || !companyPlaceholder) {
@@ -51,6 +56,7 @@ export function parseMailsuiteConfig(definition) {
   return {
     categoryName,
     mailsuiteTemplateName,
+    subject,
     placeholders: { name: namePlaceholder, company: companyPlaceholder },
   };
 }
